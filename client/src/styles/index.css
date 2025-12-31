@@ -1,0 +1,148 @@
+:root {
+  --bg-primary: #0A0A0A;
+  --bg-secondary: #121212;
+  --bg-surface: #1A1A1A;
+  --bg-surface-light: #252525;
+  
+  --primary: #0D3B2E;
+  --primary-light: #1A5C47;
+  --gold: #D4AF37;
+  --gold-light: #E8D085;
+  
+  --text-primary: #F5F5F0;
+  --text-secondary: #B0B0A8;
+  --text-muted: #707068;
+  
+  --success: #2ECC71;
+  --warning: #F1C40F;
+  --error: #E74C3C;
+  --info: #3498DB;
+  
+  --ring-salah: #27AE60;
+  --ring-quran: #3498DB;
+  --ring-workout: #E74C3C;
+  --ring-habit: #9B59B6;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+}
+
+.arabic {
+  font-family: 'Amiri', serif;
+  direction: rtl;
+  line-height: 2;
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 600;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-surface-light);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+.animate-pulse {
+  animation: pulse 2s infinite;
+}
+
+/* Container */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* Cards */
+.card {
+  background: var(--bg-surface);
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.card-gradient {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.btn-primary {
+  background: var(--gold);
+  color: var(--bg-primary);
+}
+
+.btn-primary:hover {
+  background: var(--gold-light);
+  transform: translateY(-2px);
+}
+
+.btn-secondary {
+  background: var(--bg-surface-light);
+  color: var(--text-primary);
+}
+
+.btn-secondary:hover {
+  background: var(--primary);
+}
+
+/* Progress Ring */
+.progress-ring {
+  transform: rotate(-90deg);
+}
+
+.progress-ring-circle {
+  transition: stroke-dashoffset 0.5s ease;
+}
+
