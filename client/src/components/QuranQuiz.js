@@ -1,389 +1,395 @@
-import React, { useState } from 'react';
-import { useApp } from '../context/AppContext';
-import { Play, Eye, EyeOff, Check, X, Award, RotateCcw, BookOpen, ChevronRight, AlertCircle } from 'lucide-react';
-import { SURAHS } from './QuranReader';
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { 
+  Play, Trophy, ChevronRight, Check, X, 
+  AlertCircle, Eye, EyeOff, RotateCcw, Zap, Book
+} from 'lucide-react';
 
-// Juz to Surah mapping
-const JUZ_SURAHS = {
-  1: [1, 2], 2: [2], 3: [2, 3], 4: [3, 4], 5: [4], 6: [4, 5], 7: [5, 6], 8: [6, 7],
-  9: [7, 8], 10: [8, 9], 11: [9, 10, 11], 12: [11, 12], 13: [12, 13, 14], 14: [15, 16],
-  15: [17, 18], 16: [18, 19, 20], 17: [21, 22], 18: [23, 24, 25], 19: [25, 26, 27],
-  20: [27, 28, 29], 21: [29, 30, 31, 32, 33], 22: [33, 34, 35, 36], 23: [36, 37, 38, 39],
-  24: [39, 40, 41], 25: [41, 42, 43, 44, 45], 26: [46, 47, 48, 49, 50, 51],
-  27: [51, 52, 53, 54, 55, 56, 57], 28: [58, 59, 60, 61, 62, 63, 64, 65, 66],
-  29: [67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77],
-  30: [78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114]
+// All 114 Surahs with Juz information
+const SURAH_DATA = {
+  1: { juz: 1, name: 'Al-Fatihah', arabicName: 'الفاتحة', ayahs: 7 },
+  2: { juz: [1,2,3], name: 'Al-Baqarah', arabicName: 'البقرة', ayahs: 286 },
+  3: { juz: [3,4], name: 'Aal-E-Imran', arabicName: 'آل عمران', ayahs: 200 },
+  4: { juz: [4,5,6], name: 'An-Nisa', arabicName: 'النساء', ayahs: 176 },
+  5: { juz: 6, name: 'Al-Maidah', arabicName: 'المائدة', ayahs: 120 },
+  6: { juz: [7,8], name: 'Al-Anam', arabicName: 'الأنعام', ayahs: 165 },
+  7: { juz: [8,9], name: 'Al-Araf', arabicName: 'الأعراف', ayahs: 206 },
+  8: { juz: [9,10], name: 'Al-Anfal', arabicName: 'الأنفال', ayahs: 75 },
+  9: { juz: [10,11], name: 'At-Tawbah', arabicName: 'التوبة', ayahs: 129 },
+  10: { juz: 11, name: 'Yunus', arabicName: 'يونس', ayahs: 109 },
+  11: { juz: [11,12], name: 'Hud', arabicName: 'هود', ayahs: 123 },
+  12: { juz: [12,13], name: 'Yusuf', arabicName: 'يوسف', ayahs: 111 },
+  13: { juz: 13, name: "Ar-Ra'd", arabicName: 'الرعد', ayahs: 43 },
+  14: { juz: 13, name: 'Ibrahim', arabicName: 'إبراهيم', ayahs: 52 },
+  15: { juz: 14, name: 'Al-Hijr', arabicName: 'الحجر', ayahs: 99 },
+  16: { juz: 14, name: 'An-Nahl', arabicName: 'النحل', ayahs: 128 },
+  17: { juz: 15, name: 'Al-Isra', arabicName: 'الإسراء', ayahs: 111 },
+  18: { juz: [15,16], name: 'Al-Kahf', arabicName: 'الكهف', ayahs: 110 },
+  19: { juz: 16, name: 'Maryam', arabicName: 'مريم', ayahs: 98 },
+  20: { juz: 16, name: 'Taha', arabicName: 'طه', ayahs: 135 },
+  21: { juz: 17, name: 'Al-Anbiya', arabicName: 'الأنبياء', ayahs: 112 },
+  22: { juz: 17, name: 'Al-Hajj', arabicName: 'الحج', ayahs: 78 },
+  23: { juz: 18, name: "Al-Mu'minun", arabicName: 'المؤمنون', ayahs: 118 },
+  24: { juz: 18, name: 'An-Nur', arabicName: 'النور', ayahs: 64 },
+  25: { juz: [18,19], name: 'Al-Furqan', arabicName: 'الفرقان', ayahs: 77 },
+  26: { juz: 19, name: 'Ash-Shuara', arabicName: 'الشعراء', ayahs: 227 },
+  27: { juz: [19,20], name: 'An-Naml', arabicName: 'النمل', ayahs: 93 },
+  28: { juz: 20, name: 'Al-Qasas', arabicName: 'القصص', ayahs: 88 },
+  29: { juz: [20,21], name: 'Al-Ankabut', arabicName: 'العنكبوت', ayahs: 69 },
+  30: { juz: 21, name: 'Ar-Rum', arabicName: 'الروم', ayahs: 60 },
+  31: { juz: 21, name: 'Luqman', arabicName: 'لقمان', ayahs: 34 },
+  32: { juz: 21, name: 'As-Sajdah', arabicName: 'السجدة', ayahs: 30 },
+  33: { juz: [21,22], name: 'Al-Ahzab', arabicName: 'الأحزاب', ayahs: 73 },
+  34: { juz: 22, name: 'Saba', arabicName: 'سبأ', ayahs: 54 },
+  35: { juz: 22, name: 'Fatir', arabicName: 'فاطر', ayahs: 45 },
+  36: { juz: [22,23], name: 'Ya-Sin', arabicName: 'يس', ayahs: 83 },
+  37: { juz: 23, name: 'As-Saffat', arabicName: 'الصافات', ayahs: 182 },
+  38: { juz: 23, name: 'Sad', arabicName: 'ص', ayahs: 88 },
+  39: { juz: [23,24], name: 'Az-Zumar', arabicName: 'الزمر', ayahs: 75 },
+  40: { juz: 24, name: 'Ghafir', arabicName: 'غافر', ayahs: 85 },
+  41: { juz: [24,25], name: 'Fussilat', arabicName: 'فصلت', ayahs: 54 },
+  42: { juz: 25, name: 'Ash-Shura', arabicName: 'الشورى', ayahs: 53 },
+  43: { juz: 25, name: 'Az-Zukhruf', arabicName: 'الزخرف', ayahs: 89 },
+  44: { juz: 25, name: 'Ad-Dukhan', arabicName: 'الدخان', ayahs: 59 },
+  45: { juz: 25, name: 'Al-Jathiyah', arabicName: 'الجاثية', ayahs: 37 },
+  46: { juz: 26, name: 'Al-Ahqaf', arabicName: 'الأحقاف', ayahs: 35 },
+  47: { juz: 26, name: 'Muhammad', arabicName: 'محمد', ayahs: 38 },
+  48: { juz: 26, name: 'Al-Fath', arabicName: 'الفتح', ayahs: 29 },
+  49: { juz: 26, name: 'Al-Hujurat', arabicName: 'الحجرات', ayahs: 18 },
+  50: { juz: 26, name: 'Qaf', arabicName: 'ق', ayahs: 45 },
+  51: { juz: [26,27], name: 'Adh-Dhariyat', arabicName: 'الذاريات', ayahs: 60 },
+  52: { juz: 27, name: 'At-Tur', arabicName: 'الطور', ayahs: 49 },
+  53: { juz: 27, name: 'An-Najm', arabicName: 'النجم', ayahs: 62 },
+  54: { juz: 27, name: 'Al-Qamar', arabicName: 'القمر', ayahs: 55 },
+  55: { juz: 27, name: 'Ar-Rahman', arabicName: 'الرحمن', ayahs: 78 },
+  56: { juz: 27, name: 'Al-Waqia', arabicName: 'الواقعة', ayahs: 96 },
+  57: { juz: 27, name: 'Al-Hadid', arabicName: 'الحديد', ayahs: 29 },
+  58: { juz: 28, name: 'Al-Mujadila', arabicName: 'المجادلة', ayahs: 22 },
+  59: { juz: 28, name: 'Al-Hashr', arabicName: 'الحشر', ayahs: 24 },
+  60: { juz: 28, name: 'Al-Mumtahina', arabicName: 'الممتحنة', ayahs: 13 },
+  61: { juz: 28, name: 'As-Saff', arabicName: 'الصف', ayahs: 14 },
+  62: { juz: 28, name: 'Al-Jumuah', arabicName: 'الجمعة', ayahs: 11 },
+  63: { juz: 28, name: 'Al-Munafiqun', arabicName: 'المنافقون', ayahs: 11 },
+  64: { juz: 28, name: 'At-Taghabun', arabicName: 'التغابن', ayahs: 18 },
+  65: { juz: 28, name: 'At-Talaq', arabicName: 'الطلاق', ayahs: 12 },
+  66: { juz: 28, name: 'At-Tahrim', arabicName: 'التحريم', ayahs: 12 },
+  67: { juz: 29, name: 'Al-Mulk', arabicName: 'الملك', ayahs: 30 },
+  68: { juz: 29, name: 'Al-Qalam', arabicName: 'القلم', ayahs: 52 },
+  69: { juz: 29, name: 'Al-Haqqah', arabicName: 'الحاقة', ayahs: 52 },
+  70: { juz: 29, name: 'Al-Maarij', arabicName: 'المعارج', ayahs: 44 },
+  71: { juz: 29, name: 'Nuh', arabicName: 'نوح', ayahs: 28 },
+  72: { juz: 29, name: 'Al-Jinn', arabicName: 'الجن', ayahs: 28 },
+  73: { juz: 29, name: 'Al-Muzzammil', arabicName: 'المزمل', ayahs: 20 },
+  74: { juz: 29, name: 'Al-Muddaththir', arabicName: 'المدثر', ayahs: 56 },
+  75: { juz: 29, name: 'Al-Qiyamah', arabicName: 'القيامة', ayahs: 40 },
+  76: { juz: 29, name: 'Al-Insan', arabicName: 'الإنسان', ayahs: 31 },
+  77: { juz: 29, name: 'Al-Mursalat', arabicName: 'المرسلات', ayahs: 50 },
+  78: { juz: 30, name: 'An-Naba', arabicName: 'النبأ', ayahs: 40 },
+  79: { juz: 30, name: 'An-Naziat', arabicName: 'النازعات', ayahs: 46 },
+  80: { juz: 30, name: 'Abasa', arabicName: 'عبس', ayahs: 42 },
+  81: { juz: 30, name: 'At-Takwir', arabicName: 'التكوير', ayahs: 29 },
+  82: { juz: 30, name: 'Al-Infitar', arabicName: 'الانفطار', ayahs: 19 },
+  83: { juz: 30, name: 'Al-Mutaffifin', arabicName: 'المطففين', ayahs: 36 },
+  84: { juz: 30, name: 'Al-Inshiqaq', arabicName: 'الانشقاق', ayahs: 25 },
+  85: { juz: 30, name: 'Al-Buruj', arabicName: 'البروج', ayahs: 22 },
+  86: { juz: 30, name: 'At-Tariq', arabicName: 'الطارق', ayahs: 17 },
+  87: { juz: 30, name: 'Al-Ala', arabicName: 'الأعلى', ayahs: 19 },
+  88: { juz: 30, name: 'Al-Ghashiyah', arabicName: 'الغاشية', ayahs: 26 },
+  89: { juz: 30, name: 'Al-Fajr', arabicName: 'الفجر', ayahs: 30 },
+  90: { juz: 30, name: 'Al-Balad', arabicName: 'البلد', ayahs: 20 },
+  91: { juz: 30, name: 'Ash-Shams', arabicName: 'الشمس', ayahs: 15 },
+  92: { juz: 30, name: 'Al-Layl', arabicName: 'الليل', ayahs: 21 },
+  93: { juz: 30, name: 'Ad-Duha', arabicName: 'الضحى', ayahs: 11 },
+  94: { juz: 30, name: 'Ash-Sharh', arabicName: 'الشرح', ayahs: 8 },
+  95: { juz: 30, name: 'At-Tin', arabicName: 'التين', ayahs: 8 },
+  96: { juz: 30, name: 'Al-Alaq', arabicName: 'العلق', ayahs: 19 },
+  97: { juz: 30, name: 'Al-Qadr', arabicName: 'القدر', ayahs: 5 },
+  98: { juz: 30, name: 'Al-Bayyinah', arabicName: 'البينة', ayahs: 8 },
+  99: { juz: 30, name: 'Az-Zalzalah', arabicName: 'الزلزلة', ayahs: 8 },
+  100: { juz: 30, name: 'Al-Adiyat', arabicName: 'العاديات', ayahs: 11 },
+  101: { juz: 30, name: 'Al-Qariah', arabicName: 'القارعة', ayahs: 11 },
+  102: { juz: 30, name: 'At-Takathur', arabicName: 'التكاثر', ayahs: 8 },
+  103: { juz: 30, name: 'Al-Asr', arabicName: 'العصر', ayahs: 3 },
+  104: { juz: 30, name: 'Al-Humazah', arabicName: 'الهمزة', ayahs: 9 },
+  105: { juz: 30, name: 'Al-Fil', arabicName: 'الفيل', ayahs: 5 },
+  106: { juz: 30, name: 'Quraysh', arabicName: 'قريش', ayahs: 4 },
+  107: { juz: 30, name: 'Al-Maun', arabicName: 'الماعون', ayahs: 7 },
+  108: { juz: 30, name: 'Al-Kawthar', arabicName: 'الكوثر', ayahs: 3 },
+  109: { juz: 30, name: 'Al-Kafirun', arabicName: 'الكافرون', ayahs: 6 },
+  110: { juz: 30, name: 'An-Nasr', arabicName: 'النصر', ayahs: 3 },
+  111: { juz: 30, name: 'Al-Masad', arabicName: 'المسد', ayahs: 5 },
+  112: { juz: 30, name: 'Al-Ikhlas', arabicName: 'الإخلاص', ayahs: 4 },
+  113: { juz: 30, name: 'Al-Falaq', arabicName: 'الفلق', ayahs: 5 },
+  114: { juz: 30, name: 'An-Nas', arabicName: 'الناس', ayahs: 6 },
 };
 
+// Number of ayahs per page (~15 ayahs = 1 page)
 const AYAHS_PER_PAGE = 15;
 
-const fetchSurahAyahs = async (surahNumber) => {
-  const response = await fetch(`https://api.alquran.cloud/v1/surah/${surahNumber}/ar.alafasy`);
-  if (!response.ok) throw new Error('Failed to fetch');
-  const data = await response.json();
-  return data.data.ayahs;
-};
-
 function QuranQuiz() {
-  const { addXp, recordQuizResult } = useApp();
+  const { user } = useAuth();
   
-  const [settings, setSettings] = useState({
-    mode: 'surah',
-    surahFrom: 112,
-    surahTo: 114,
-    juzFrom: 30,
-    juzTo: 30,
-    questionCount: 5,
-    pageLength: 1
+  const [mode, setMode] = useState('setup'); // setup, quiz, reciting, results
+  const [quizConfig, setQuizConfig] = useState({
+    numRounds: 5,
+    recitationLength: 1, // 1 or 1.5 pages
   });
-
-  const [state, setState] = useState('setup');
-  const [questions, setQuestions] = useState([]);
-  const [currentQ, setCurrentQ] = useState(0);
-  const [revealed, setRevealed] = useState(false);
-  const [results, setResults] = useState([]);
-  const [error, setError] = useState(null);
   
-  // Mistake highlighting
-  const [highlightedMistakes, setHighlightedMistakes] = useState([]);
-  const [highlightMode, setHighlightMode] = useState(false);
+  const [questions, setQuestions] = useState([]);
+  const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [score, setScore] = useState({ correct: 0, total: 0 });
+  const [loading, setLoading] = useState(false);
+  const [quizHistory, setQuizHistory] = useState([]);
+  const [continuationAyahs, setContinuationAyahs] = useState([]);
+  const [loadingContinuation, setLoadingContinuation] = useState(false);
 
-  const generateQuestions = async () => {
-    setState('loading');
-    setError(null);
-    
+  useEffect(() => {
+    if (user) {
+      loadQuizHistory();
+    }
+  }, [user]);
+
+  const loadQuizHistory = async () => {
     try {
-      let allAyahs = [];
-      let surahsToFetch = [];
-      
-      if (settings.mode === 'surah') {
-        for (let i = settings.surahFrom; i <= settings.surahTo; i++) {
-          surahsToFetch.push(i);
-        }
-      } else {
-        for (let j = settings.juzFrom; j <= settings.juzTo; j++) {
-          surahsToFetch.push(...(JUZ_SURAHS[j] || []));
-        }
-        surahsToFetch = [...new Set(surahsToFetch)];
+      const docRef = doc(db, 'users', user.uid, 'quran', 'quiz');
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        setQuizHistory(docSnap.data().history || []);
       }
-
-      const limitedSurahs = surahsToFetch.slice(0, 8);
-      
-      for (const surahNum of limitedSurahs) {
-        try {
-          const ayahs = await fetchSurahAyahs(surahNum);
-          const surahInfo = SURAHS.find(s => s.number === surahNum);
-          allAyahs.push(...ayahs.map(a => ({
-            ...a,
-            surahNum,
-            surahName: surahInfo?.name || `Surah ${surahNum}`,
-            surahArabic: surahInfo?.arabicName || ''
-          })));
-        } catch (err) {
-          console.error(`Error fetching surah ${surahNum}:`, err);
-        }
-      }
-
-      if (allAyahs.length < AYAHS_PER_PAGE) {
-        throw new Error('Not enough ayahs. Please select more surahs.');
-      }
-
-      const ayahsNeeded = Math.floor(AYAHS_PER_PAGE * settings.pageLength);
-      const generatedQs = [];
-      const usedStarts = new Set();
-
-      for (let i = 0; i < settings.questionCount && i < 20; i++) {
-        let attempts = 0;
-        let startIdx = -1;
-        
-        while (attempts < 50) {
-          const idx = Math.floor(Math.random() * (allAyahs.length - ayahsNeeded));
-          if (!usedStarts.has(idx) && idx >= 0) {
-            startIdx = idx;
-            usedStarts.add(idx);
-            break;
-          }
-          attempts++;
-        }
-
-        if (startIdx === -1) continue;
-
-        const startAyah = allAyahs[startIdx];
-        const continuationAyahs = allAyahs.slice(startIdx + 1, startIdx + ayahsNeeded + 1);
-
-        if (continuationAyahs.length < 3) continue;
-
-        generatedQs.push({
-          id: i,
-          startAyah: {
-            text: startAyah.text,
-            surahName: startAyah.surahName,
-            surahArabic: startAyah.surahArabic,
-            surahNum: startAyah.surahNum,
-            ayahNum: startAyah.numberInSurah
-          },
-          continuation: continuationAyahs.map(a => ({
-            text: a.text,
-            ayahNum: a.numberInSurah,
-            surahNum: a.surahNum,
-            surahName: a.surahName
-          })),
-          pageCount: settings.pageLength
-        });
-      }
-
-      if (generatedQs.length === 0) {
-        throw new Error('Could not generate questions. Try selecting different surahs.');
-      }
-
-      setQuestions(generatedQs);
-      setCurrentQ(0);
-      setResults([]);
-      setRevealed(false);
-      setHighlightedMistakes([]);
-      setHighlightMode(false);
-      setState('playing');
-    } catch (err) {
-      console.error('Error:', err);
-      setError(err.message || 'Failed to generate quiz.');
-      setState('setup');
+    } catch (error) {
+      console.error('Error loading quiz history:', error);
     }
   };
 
-  const handleReveal = () => {
-    setRevealed(true);
-    setHighlightedMistakes([]);
-    setHighlightMode(false);
+  const saveQuizResult = async (result) => {
+    try {
+      const docRef = doc(db, 'users', user.uid, 'quran', 'quiz');
+      const newHistory = [...quizHistory, result].slice(-50);
+      await setDoc(docRef, { history: newHistory, updatedAt: new Date().toISOString() });
+      setQuizHistory(newHistory);
+    } catch (error) {
+      console.error('Error saving quiz result:', error);
+    }
   };
 
-  const toggleMistake = (ayahIndex) => {
-    if (!highlightMode) return;
+  // Generate random starting points from ALL 30 Juz
+  const generateQuestions = async () => {
+    setLoading(true);
+    const generatedQuestions = [];
+    const usedPositions = new Set();
     
-    setHighlightedMistakes(prev => {
-      if (prev.includes(ayahIndex)) {
-        return prev.filter(i => i !== ayahIndex);
-      } else {
-        return [...prev, ayahIndex];
+    for (let i = 0; i < quizConfig.numRounds; i++) {
+      // Pick a random Juz (1-30)
+      const targetJuz = Math.floor(Math.random() * 30) + 1;
+      
+      // Find surahs in this Juz
+      const surahsInJuz = Object.entries(SURAH_DATA).filter(([_, info]) => {
+        const juz = info.juz;
+        if (Array.isArray(juz)) return juz.includes(targetJuz);
+        return juz === targetJuz;
+      });
+      
+      if (surahsInJuz.length === 0) continue;
+      
+      // Pick random surah from this Juz
+      const [surahNum, surahInfo] = surahsInJuz[Math.floor(Math.random() * surahsInJuz.length)];
+      const surah = parseInt(surahNum);
+      
+      // Pick random ayah (not too close to the end to allow continuation)
+      const maxStartAyah = Math.max(1, surahInfo.ayahs - 20);
+      let ayahNum;
+      let positionKey;
+      let attempts = 0;
+      
+      do {
+        ayahNum = Math.floor(Math.random() * maxStartAyah) + 1;
+        positionKey = `${surah}:${ayahNum}`;
+        attempts++;
+      } while (usedPositions.has(positionKey) && attempts < 20);
+      
+      usedPositions.add(positionKey);
+      
+      // Fetch the starting ayah
+      try {
+        const response = await fetch(
+          `https://api.alquran.cloud/v1/ayah/${surah}:${ayahNum}/ar.alafasy`
+        );
+        const data = await response.json();
+        
+        if (data.code === 200) {
+          generatedQuestions.push({
+            id: i,
+            surah,
+            surahName: surahInfo.name,
+            surahArabic: surahInfo.arabicName,
+            juz: targetJuz,
+            ayahNum,
+            totalAyahs: surahInfo.ayahs,
+            startingAyah: data.data.text,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching ayah:', error);
       }
-    });
+    }
+    
+    // Shuffle questions
+    generatedQuestions.sort(() => Math.random() - 0.5);
+    
+    setQuestions(generatedQuestions);
+    setCurrentQuestion(0);
+    setScore({ correct: 0, total: generatedQuestions.length });
+    setMode('quiz');
+    setLoading(false);
   };
 
-  const handleResult = (passed) => {
-    const mistakeCount = highlightedMistakes.length;
-    const totalAyahs = questions[currentQ]?.continuation.length || 0;
+  // Fetch continuation ayahs (what comes AFTER the starting ayah)
+  const fetchContinuation = async (question) => {
+    setLoadingContinuation(true);
+    const numAyahs = Math.round(AYAHS_PER_PAGE * quizConfig.recitationLength);
+    const ayahs = [];
     
-    setResults([...results, { 
-      questionId: currentQ, 
-      passed,
-      mistakes: highlightedMistakes,
-      mistakeCount,
-      totalAyahs
-    }]);
+    for (let i = 1; i <= numAyahs; i++) {
+      const nextAyah = question.ayahNum + i;
+      if (nextAyah > question.totalAyahs) break;
+      
+      try {
+        const response = await fetch(
+          `https://api.alquran.cloud/v1/ayah/${question.surah}:${nextAyah}/ar.alafasy`
+        );
+        const data = await response.json();
+        
+        if (data.code === 200) {
+          ayahs.push({
+            num: nextAyah,
+            text: data.data.text,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching ayah:', error);
+      }
+    }
     
-    if (currentQ < questions.length - 1) {
-      setCurrentQ(currentQ + 1);
-      setRevealed(false);
-      setHighlightedMistakes([]);
-      setHighlightMode(false);
+    setContinuationAyahs(ayahs);
+    setLoadingContinuation(false);
+    setShowAnswer(true);
+  };
+
+  const handleAnswer = (isCorrect) => {
+    const newScore = isCorrect ? score.correct + 1 : score.correct;
+    setScore(prev => ({ ...prev, correct: newScore }));
+    setShowAnswer(false);
+    setContinuationAyahs([]);
+    
+    if (currentQuestion < questions.length - 1) {
+      setCurrentQuestion(currentQuestion + 1);
     } else {
-      const allResults = [...results, { questionId: currentQ, passed, mistakes: highlightedMistakes, mistakeCount, totalAyahs }];
-      const passedCount = allResults.filter(r => r.passed).length;
-      const totalMistakes = allResults.reduce((sum, r) => sum + (r.mistakeCount || 0), 0);
-      const xpEarned = passedCount * 20;
-      addXp(xpEarned);
-      recordQuizResult(passedCount >= questions.length / 2, questions.length, totalMistakes);
-      setState('results');
+      // Quiz complete
+      const finalResult = {
+        correct: newScore,
+        total: questions.length,
+        percentage: Math.round((newScore / questions.length) * 100),
+        date: new Date().toISOString(),
+        recitationLength: quizConfig.recitationLength,
+      };
+      saveQuizResult(finalResult);
+      setMode('results');
     }
   };
 
   const getScoreMessage = (percentage) => {
-    if (percentage >= 90) return { emoji: '🏆', title: 'Mumtaz!', message: 'Excellent! Your memorization is strong.' };
-    if (percentage >= 70) return { emoji: '⭐', title: 'Jayyid Jiddan!', message: 'Very good! Keep practicing.' };
-    if (percentage >= 50) return { emoji: '👍', title: 'Jayyid!', message: 'Good effort. Review weak areas.' };
-    return { emoji: '📖', title: 'Keep Going!', message: 'More revision needed. Don\'t give up!' };
+    if (percentage >= 90) return { emoji: '🏆', message: 'ما شاء الله! Excellent Hafiz!', color: 'var(--gold)' };
+    if (percentage >= 70) return { emoji: '⭐', message: 'Great memorization!', color: 'var(--success)' };
+    if (percentage >= 50) return { emoji: '📖', message: 'Good effort. Keep reviewing!', color: 'var(--warning)' };
+    return { emoji: '💪', message: 'Practice makes perfect!', color: 'var(--error)' };
   };
 
-  // Loading
-  if (state === 'loading') {
-    return (
-      <div className="quiz-loading">
-        <div className="spinner" />
-        <p>Preparing Musabaqah...</p>
-        <span>Loading ayahs from the Quran</span>
-        <style>{`
-          .quiz-loading {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 80px 20px;
-            text-align: center;
-          }
-          .spinner {
-            width: 48px;
-            height: 48px;
-            border: 4px solid var(--bg-surface-light);
-            border-top-color: var(--gold);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 20px;
-          }
-          @keyframes spin { to { transform: rotate(360deg); } }
-        `}</style>
-      </div>
-    );
-  }
-
-  // Setup
-  if (state === 'setup') {
+  // Setup Screen
+  if (mode === 'setup') {
     return (
       <div className="quiz-setup">
         <div className="setup-header">
-          <BookOpen size={36} className="icon" />
-          <h2>Musabaqah</h2>
-          <p>Quran Competition Style Quiz</p>
+          <Trophy size={40} className="trophy-icon" />
+          <h2>مسابقة القرآن</h2>
+          <h3>Musabaqah Quiz</h3>
+          <p>You'll be given an ayah. Recite what comes AFTER it.</p>
         </div>
 
-        <div className="info-box">
-          <h4>📜 How it works:</h4>
-          <ol>
-            <li>You'll be given a <strong>starting ayah</strong></li>
-            <li>Recite the <strong>next 1-1.5 pages</strong> from memory</li>
-            <li>Tap <strong>"Reveal"</strong> to see the correct continuation</li>
-            <li><strong>Highlight mistakes</strong> by tapping on ayahs you got wrong</li>
-            <li>Mark if you <strong>passed</strong> or <strong>made mistakes</strong></li>
-          </ol>
-        </div>
-
-        {error && (
-          <div className="error-banner">
-            <X size={16} />
-            <span>{error}</span>
-          </div>
-        )}
-
-        <div className="setting-group">
-          <label>Select Range</label>
-          <div className="mode-selector">
-            <button 
-              className={`mode-btn ${settings.mode === 'surah' ? 'active' : ''}`}
-              onClick={() => setSettings(p => ({ ...p, mode: 'surah' }))}
-            >
-              By Surah
-            </button>
-            <button 
-              className={`mode-btn ${settings.mode === 'juz' ? 'active' : ''}`}
-              onClick={() => setSettings(p => ({ ...p, mode: 'juz' }))}
-            >
-              By Juz
-            </button>
-          </div>
-        </div>
-
-        {settings.mode === 'surah' ? (
-          <div className="setting-group">
-            <label>Surah Range</label>
-            <div className="range-row">
-              <div className="range-select">
-                <span className="range-label">From</span>
-                <select 
-                  value={settings.surahFrom}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    setSettings(p => ({ ...p, surahFrom: val, surahTo: Math.max(val, p.surahTo) }));
-                  }}
+        <div className="setup-options">
+          <div className="option-group">
+            <label>Number of Rounds</label>
+            <div className="round-selector">
+              {[3, 5, 7, 10].map(num => (
+                <button
+                  key={num}
+                  className={`round-btn ${quizConfig.numRounds === num ? 'active' : ''}`}
+                  onClick={() => setQuizConfig(p => ({ ...p, numRounds: num }))}
                 >
-                  {SURAHS.map(s => (
-                    <option key={s.number} value={s.number}>{s.number}. {s.name}</option>
-                  ))}
-                </select>
-              </div>
-              <ChevronRight size={20} className="range-arrow" />
-              <div className="range-select">
-                <span className="range-label">To</span>
-                <select 
-                  value={settings.surahTo}
-                  onChange={(e) => setSettings(p => ({ ...p, surahTo: parseInt(e.target.value) }))}
-                >
-                  {SURAHS.filter(s => s.number >= settings.surahFrom).map(s => (
-                    <option key={s.number} value={s.number}>{s.number}. {s.name}</option>
-                  ))}
-                </select>
-              </div>
+                  {num}
+                </button>
+              ))}
             </div>
           </div>
-        ) : (
-          <div className="setting-group">
-            <label>Juz Range</label>
-            <div className="range-row">
-              <div className="range-select">
-                <span className="range-label">From Juz</span>
-                <select 
-                  value={settings.juzFrom}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    setSettings(p => ({ ...p, juzFrom: val, juzTo: Math.max(val, p.juzTo) }));
-                  }}
-                >
-                  {Array.from({ length: 30 }, (_, i) => i + 1).map(j => (
-                    <option key={j} value={j}>Juz {j}</option>
-                  ))}
-                </select>
-              </div>
-              <ChevronRight size={20} className="range-arrow" />
-              <div className="range-select">
-                <span className="range-label">To Juz</span>
-                <select 
-                  value={settings.juzTo}
-                  onChange={(e) => setSettings(p => ({ ...p, juzTo: parseInt(e.target.value) }))}
-                >
-                  {Array.from({ length: 30 }, (_, i) => i + 1).filter(j => j >= settings.juzFrom).map(j => (
-                    <option key={j} value={j}>Juz {j}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-        )}
 
-        <div className="setting-group">
-          <label>Recitation Length</label>
-          <div className="length-selector">
-            <button 
-              className={`length-btn ${settings.pageLength === 1 ? 'active' : ''}`}
-              onClick={() => setSettings(p => ({ ...p, pageLength: 1 }))}
-            >
-              <span className="length-value">1</span>
-              <span className="length-label">Page</span>
-            </button>
-            <button 
-              className={`length-btn ${settings.pageLength === 1.5 ? 'active' : ''}`}
-              onClick={() => setSettings(p => ({ ...p, pageLength: 1.5 }))}
-            >
-              <span className="length-value">1.5</span>
-              <span className="length-label">Pages</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="setting-group">
-          <label>Number of Rounds</label>
-          <div className="count-selector">
-            {[3, 5, 7, 10].map(n => (
+          <div className="option-group">
+            <label>Recitation Length</label>
+            <div className="length-selector">
               <button
-                key={n}
-                className={`count-btn ${settings.questionCount === n ? 'active' : ''}`}
-                onClick={() => setSettings(p => ({ ...p, questionCount: n }))}
+                className={`length-btn ${quizConfig.recitationLength === 1 ? 'active' : ''}`}
+                onClick={() => setQuizConfig(p => ({ ...p, recitationLength: 1 }))}
               >
-                {n}
+                <Book size={20} />
+                <span className="length-label">1 Page</span>
+                <span className="length-desc">~15 ayahs</span>
               </button>
-            ))}
+              <button
+                className={`length-btn ${quizConfig.recitationLength === 1.5 ? 'active' : ''}`}
+                onClick={() => setQuizConfig(p => ({ ...p, recitationLength: 1.5 }))}
+              >
+                <Book size={20} />
+                <span className="length-label">1.5 Pages</span>
+                <span className="length-desc">~22 ayahs</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="quiz-info">
+            <AlertCircle size={16} />
+            <div>
+              <strong>How it works:</strong>
+              <p>1. You see a starting ayah from anywhere in the Quran (Juz 1-30)</p>
+              <p>2. Recite what comes AFTER it (not including the ayah shown)</p>
+              <p>3. Click "Show Answer" to check your recitation</p>
+              <p>4. Mark as correct or incorrect</p>
+            </div>
           </div>
         </div>
 
-        <button className="btn btn-primary start-btn" onClick={generateQuestions}>
-          <Play size={20} /> Start Musabaqah
+        <button className="start-quiz-btn" onClick={generateQuestions} disabled={loading}>
+          {loading ? (
+            <>Preparing Questions...</>
+          ) : (
+            <><Play size={20} /> Start Musabaqah</>
+          )}
         </button>
+
+        {quizHistory.length > 0 && (
+          <div className="quiz-history">
+            <h3>Recent Scores</h3>
+            <div className="history-list">
+              {quizHistory.slice(-5).reverse().map((result, i) => (
+                <div key={i} className="history-item">
+                  <span className="history-score">{result.percentage}%</span>
+                  <span className="history-detail">{result.correct}/{result.total}</span>
+                  <span className="history-date">{new Date(result.date).toLocaleDateString()}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <style>{`
           .quiz-setup { animation: fadeIn 0.3s ease-out; }
@@ -392,255 +398,248 @@ function QuranQuiz() {
             padding: 30px 20px;
             background: linear-gradient(135deg, var(--primary) 0%, #1a4a3a 100%);
             border-radius: 20px;
-            margin-bottom: 16px;
+            margin-bottom: 20px;
           }
-          .setup-header .icon { color: var(--gold); margin-bottom: 12px; }
-          .setup-header h2 { font-size: 26px; margin-bottom: 6px; }
-          .setup-header p { color: var(--text-muted); font-size: 14px; }
-          
-          .info-box {
-            background: rgba(212,175,55,0.1);
-            border: 1px solid rgba(212,175,55,0.3);
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 16px;
+          .trophy-icon { color: var(--gold); margin-bottom: 12px; }
+          .setup-header h2 { 
+            font-size: 28px; 
+            margin-bottom: 4px;
+            font-family: 'Amiri', serif;
           }
-          .info-box h4 { font-size: 14px; margin-bottom: 10px; color: var(--gold); }
-          .info-box ol { padding-left: 20px; margin: 0; }
-          .info-box li { font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; line-height: 1.5; }
-          
-          .error-banner {
-            display: flex; align-items: center; gap: 8px;
-            background: rgba(231,76,60,0.2); color: var(--error);
-            padding: 12px 16px; border-radius: 10px; margin-bottom: 16px; font-size: 13px;
-          }
-          .setting-group {
+          .setup-header h3 { font-size: 18px; margin-bottom: 8px; color: var(--gold); }
+          .setup-header p { color: var(--text-secondary); font-size: 14px; }
+          .setup-options {
             background: var(--bg-surface);
-            padding: 16px;
-            border-radius: 12px;
-            margin-bottom: 12px;
+            padding: 20px;
+            border-radius: 16px;
+            margin-bottom: 20px;
           }
-          .setting-group label {
+          .option-group {
+            margin-bottom: 20px;
+          }
+          .option-group:last-child { margin-bottom: 0; }
+          .option-group label {
             display: block;
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 600;
             margin-bottom: 12px;
-            color: var(--text-secondary);
           }
-          .mode-selector { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-          .mode-btn {
+          .round-selector {
+            display: flex;
+            gap: 10px;
+          }
+          .round-btn {
+            flex: 1;
             padding: 14px;
             background: var(--bg-surface-light);
             border: 2px solid transparent;
-            border-radius: 10px;
-            color: var(--text-secondary);
-            font-size: 14px;
-            font-weight: 600;
+            border-radius: 12px;
+            color: var(--text-primary);
+            font-size: 18px;
+            font-weight: 700;
             cursor: pointer;
+            transition: all 0.2s ease;
           }
-          .mode-btn.active {
+          .round-btn.active {
             background: var(--primary);
             border-color: var(--gold);
             color: var(--gold);
           }
-          .range-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-          }
-          .range-select { flex: 1; }
-          .range-label {
-            display: block;
-            font-size: 11px;
-            color: var(--text-muted);
-            margin-bottom: 6px;
-            text-transform: uppercase;
-          }
-          .range-arrow { color: var(--text-muted); flex-shrink: 0; }
-          select {
-            width: 100%;
-            padding: 12px;
-            background: var(--bg-surface-light);
-            border: none;
-            border-radius: 8px;
-            color: var(--text-primary);
-            font-size: 13px;
-          }
           .length-selector {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 10px;
+            gap: 12px;
           }
           .length-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
             padding: 16px;
             background: var(--bg-surface-light);
             border: 2px solid transparent;
             border-radius: 12px;
             cursor: pointer;
-            text-align: center;
+            transition: all 0.2s ease;
           }
           .length-btn.active {
             background: var(--primary);
             border-color: var(--gold);
           }
-          .length-value {
-            display: block;
-            font-size: 28px;
-            font-weight: 700;
-            color: var(--text-primary);
-            font-family: 'Space Grotesk', sans-serif;
-          }
-          .length-btn.active .length-value { color: var(--gold); }
+          .length-btn svg { color: var(--text-muted); margin-bottom: 8px; }
+          .length-btn.active svg { color: var(--gold); }
           .length-label {
-            font-size: 12px;
-            color: var(--text-muted);
-          }
-          .count-selector {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-          }
-          .count-btn {
-            padding: 14px;
-            background: var(--bg-surface-light);
-            border: 2px solid transparent;
-            border-radius: 10px;
-            color: var(--text-secondary);
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 600;
+            color: var(--text-primary);
+          }
+          .length-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+          }
+          .length-btn.active .length-label { color: var(--gold); }
+          .quiz-info {
+            display: flex;
+            gap: 12px;
+            padding: 16px;
+            background: rgba(212,175,55,0.1);
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+          }
+          .quiz-info svg { flex-shrink: 0; color: var(--gold); margin-top: 2px; }
+          .quiz-info strong { color: var(--gold); display: block; margin-bottom: 6px; }
+          .quiz-info p { margin: 4px 0; line-height: 1.4; }
+          .start-quiz-btn {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 18px;
+            background: var(--gold);
+            border: none;
+            border-radius: 14px;
+            color: var(--bg-primary);
+            font-size: 16px;
+            font-weight: 700;
             cursor: pointer;
           }
-          .count-btn.active {
-            background: var(--primary);
-            border-color: var(--gold);
-            color: var(--gold);
+          .start-quiz-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
           }
-          .start-btn {
-            width: 100%;
-            padding: 18px;
+          .quiz-history {
+            margin-top: 24px;
+            background: var(--bg-surface);
+            padding: 16px;
+            border-radius: 14px;
+          }
+          .quiz-history h3 {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+          }
+          .history-list { display: flex; flex-direction: column; gap: 8px; }
+          .history-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            background: var(--bg-surface-light);
+            border-radius: 10px;
+          }
+          .history-score {
             font-size: 16px;
-            margin-top: 8px;
+            font-weight: 700;
+            color: var(--gold);
+            min-width: 50px;
           }
+          .history-detail { font-size: 13px; color: var(--text-muted); flex: 1; }
+          .history-date { font-size: 11px; color: var(--text-muted); }
+          @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         `}</style>
       </div>
     );
   }
 
-  // Playing
-  if (state === 'playing' && questions.length > 0) {
-    const q = questions[currentQ];
+  // Quiz Screen
+  if (mode === 'quiz' && questions.length > 0) {
+    const question = questions[currentQuestion];
     
     return (
-      <div className="quiz-playing">
-        {/* Progress */}
+      <div className="quiz-active">
         <div className="quiz-progress">
-          <span>Round {currentQ + 1} of {questions.length}</span>
+          <span>Round {currentQuestion + 1} / {questions.length}</span>
           <div className="progress-bar">
-            <div className="progress-fill" style={{ width: `${((currentQ + 1) / questions.length) * 100}%` }} />
+            <div className="progress-fill" style={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }} />
+          </div>
+          <span className="score-display">{score.correct} ✓</span>
+        </div>
+
+        <div className="question-card">
+          <div className="question-meta">
+            <span className="juz-badge">Juz {question.juz}</span>
+            <span className="surah-badge">{question.surahName}</span>
+          </div>
+          
+          <p className="question-prompt">
+            <strong>Starting Point:</strong> Recite what comes AFTER this ayah
+          </p>
+          
+          <div className="starting-ayah arabic">
+            {question.startingAyah}
+          </div>
+          
+          <span className="ayah-ref">
+            {question.surahArabic} ({question.surahName}) - Ayah {question.ayahNum}
+          </span>
+          
+          <div className="recitation-target">
+            <ChevronRight size={16} />
+            Continue for ~{Math.round(AYAHS_PER_PAGE * quizConfig.recitationLength)} ayahs ({quizConfig.recitationLength} page{quizConfig.recitationLength > 1 ? 's' : ''})
           </div>
         </div>
 
-        {/* Starting Ayah Card */}
-        <div className="start-card">
-          <div className="start-label">
-            <span className="label-icon">📖</span>
-            <span>Start from here:</span>
-          </div>
-          <div className="surah-info">
-            <span className="surah-name">{q.startAyah.surahName}</span>
-            <span className="surah-arabic">{q.startAyah.surahArabic}</span>
-            <span className="ayah-ref">Ayah {q.startAyah.ayahNum}</span>
-          </div>
-          <p className="arabic start-ayah">{q.startAyah.text}</p>
-          <div className="instruction">
-            ⬇️ Continue reciting {q.pageCount} page{q.pageCount > 1 ? 's' : ''} from memory
-          </div>
-        </div>
-
-        {/* Reveal Section */}
-        {!revealed ? (
-          <button className="reveal-btn" onClick={handleReveal}>
-            <Eye size={20} /> Reveal Continuation
-          </button>
-        ) : (
-          <div className="continuation-section">
-            <div className="continuation-header">
-              <EyeOff size={16} />
-              <span>Correct Continuation ({q.continuation.length} ayahs)</span>
-            </div>
-
-            {/* Highlight Toggle */}
-            <div className="highlight-toggle">
-              <button 
-                className={`toggle-btn ${highlightMode ? 'active' : ''}`}
-                onClick={() => setHighlightMode(!highlightMode)}
-              >
-                <AlertCircle size={16} />
-                {highlightMode ? 'Done Highlighting' : 'Highlight Mistakes'}
-              </button>
-              {highlightedMistakes.length > 0 && (
-                <span className="mistake-count">
-                  {highlightedMistakes.length} mistake{highlightedMistakes.length !== 1 ? 's' : ''} marked
-                </span>
-              )}
-            </div>
-
-            {highlightMode && (
-              <div className="highlight-hint">
-                👆 Tap on any ayah where you made a mistake
-              </div>
+        {/* Show Answer Button */}
+        {!showAnswer && (
+          <button 
+            className="reveal-btn"
+            onClick={() => fetchContinuation(question)}
+            disabled={loadingContinuation}
+          >
+            {loadingContinuation ? (
+              <>Loading...</>
+            ) : (
+              <><Eye size={18} /> Show What Comes After</>
             )}
-            
-            <div className={`continuation-text ${highlightMode ? 'highlight-mode' : ''}`}>
-              {q.continuation.map((ayah, i) => {
-                const isMistake = highlightedMistakes.includes(i);
-                return (
-                  <span 
-                    key={i} 
-                    className={`cont-ayah ${isMistake ? 'mistake' : ''} ${highlightMode ? 'clickable' : ''}`}
-                    onClick={() => toggleMistake(i)}
-                  >
-                    <span className="arabic">{ayah.text}</span>
-                    <span className="ayah-num">({ayah.ayahNum})</span>
-                    {isMistake && <span className="mistake-marker">✗</span>}
-                  </span>
-                );
-              })}
-            </div>
+          </button>
+        )}
 
-            <div className="result-prompt">
-              <p>How did you do overall?</p>
-              {highlightedMistakes.length > 0 && (
-                <div className="mistakes-summary">
-                  <AlertCircle size={14} />
-                  <span>You marked {highlightedMistakes.length} mistake{highlightedMistakes.length !== 1 ? 's' : ''} in {q.continuation.length} ayahs</span>
+        {/* Answer Display */}
+        {showAnswer && continuationAyahs.length > 0 && (
+          <div className="answer-section">
+            <h4>What comes AFTER (Ayah {question.ayahNum + 1} onwards):</h4>
+            <div className="continuation-ayahs">
+              {continuationAyahs.map((ayah, idx) => (
+                <div key={idx} className="continuation-ayah">
+                  <span className="ayah-num">{ayah.num}</span>
+                  <span className="ayah-text arabic">{ayah.text}</span>
                 </div>
-              )}
-              <div className="result-buttons">
-                <button className="result-btn pass" onClick={() => handleResult(true)}>
-                  <Check size={20} />
-                  <span>Passed</span>
-                  <small>Minor/No mistakes</small>
-                </button>
-                <button className="result-btn fail" onClick={() => handleResult(false)}>
-                  <X size={20} />
-                  <span>Failed</span>
-                  <small>Major mistakes</small>
-                </button>
-              </div>
+              ))}
             </div>
           </div>
         )}
 
+        {/* Answer Buttons */}
+        {showAnswer && (
+          <div className="answer-buttons">
+            <button className="answer-btn wrong" onClick={() => handleAnswer(false)}>
+              <X size={18} />
+              Made Mistakes
+            </button>
+            <button className="answer-btn correct" onClick={() => handleAnswer(true)}>
+              <Check size={18} />
+              Recited Correctly
+            </button>
+          </div>
+        )}
+
         <style>{`
-          .quiz-playing { animation: fadeIn 0.3s ease-out; }
-          .quiz-progress { margin-bottom: 20px; }
-          .quiz-progress span { font-size: 12px; color: var(--text-muted); }
+          .quiz-active { animation: fadeIn 0.3s ease-out; }
+          .quiz-progress {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            font-size: 13px;
+            color: var(--text-muted);
+          }
           .progress-bar {
+            flex: 1;
             height: 6px;
             background: var(--bg-surface);
             border-radius: 3px;
-            margin-top: 8px;
             overflow: hidden;
           }
           .progress-fill {
@@ -648,466 +647,280 @@ function QuranQuiz() {
             background: var(--gold);
             transition: width 0.3s ease;
           }
-          
-          .start-card {
-            background: linear-gradient(135deg, var(--primary) 0%, #1a4a3a 100%);
+          .score-display {
+            color: var(--success);
+            font-weight: 600;
+          }
+          .question-card {
+            background: var(--bg-surface);
             border-radius: 20px;
             padding: 24px;
             margin-bottom: 16px;
-            border-left: 4px solid var(--gold);
+            text-align: center;
           }
-          .start-label {
+          .question-meta {
             display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 13px;
-            color: var(--text-muted);
-            margin-bottom: 12px;
-          }
-          .label-icon { font-size: 18px; }
-          .surah-info {
-            display: flex;
-            align-items: center;
-            gap: 12px;
+            justify-content: center;
+            gap: 10px;
             margin-bottom: 16px;
-            flex-wrap: wrap;
           }
-          .surah-name {
-            font-size: 16px;
+          .juz-badge, .surah-badge {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
             font-weight: 600;
           }
-          .surah-arabic {
-            font-family: 'Amiri', serif;
-            font-size: 18px;
+          .juz-badge {
+            background: var(--primary);
             color: var(--gold);
+          }
+          .surah-badge {
+            background: var(--bg-surface-light);
+            color: var(--text-secondary);
+          }
+          .question-prompt {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 20px;
+          }
+          .starting-ayah {
+            font-size: 26px;
+            line-height: 2.2;
+            margin-bottom: 16px;
+            padding: 20px;
+            background: var(--bg-surface-light);
+            border-radius: 16px;
+            border-left: 4px solid var(--gold);
           }
           .ayah-ref {
-            background: rgba(212,175,55,0.2);
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 11px;
+            font-size: 12px;
+            color: var(--text-muted);
+            display: block;
+            margin-bottom: 12px;
+          }
+          .recitation-target {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 10px;
+            background: rgba(212,175,55,0.1);
+            border-radius: 10px;
+            font-size: 12px;
             color: var(--gold);
           }
-          .start-ayah {
-            font-size: 28px;
-            line-height: 2.2;
-            color: var(--text-primary);
-            text-align: center;
-            padding: 20px 0;
-            border-top: 1px solid rgba(255,255,255,0.1);
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-          }
-          .instruction {
-            text-align: center;
-            font-size: 13px;
-            color: var(--gold);
-            margin-top: 16px;
-          }
-          
           .reveal-btn {
             width: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
-            padding: 18px;
-            background: var(--bg-surface);
-            border: 2px dashed var(--gold);
+            gap: 8px;
+            padding: 16px;
+            background: var(--primary);
+            border: 2px solid var(--gold);
             border-radius: 14px;
             color: var(--gold);
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s ease;
-          }
-          .reveal-btn:hover {
-            background: var(--primary);
-          }
-          
-          .continuation-section {
-            background: var(--bg-surface);
-            border-radius: 16px;
-            overflow: hidden;
-            animation: slideUp 0.3s ease-out;
-          }
-          @keyframes slideUp {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-          }
-          .continuation-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 14px 16px;
-            background: var(--bg-surface-light);
-            font-size: 13px;
-            color: var(--text-muted);
-          }
-
-          .highlight-toggle {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--bg-surface-light);
-          }
-          .toggle-btn {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 16px;
-            background: var(--bg-surface-light);
-            border: 2px solid transparent;
-            border-radius: 10px;
-            color: var(--text-secondary);
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-          }
-          .toggle-btn.active {
-            background: rgba(231,76,60,0.15);
-            border-color: var(--error);
-            color: var(--error);
-          }
-          .mistake-count {
-            font-size: 12px;
-            color: var(--error);
-            background: rgba(231,76,60,0.15);
-            padding: 6px 12px;
-            border-radius: 12px;
-          }
-
-          .highlight-hint {
-            text-align: center;
-            font-size: 12px;
-            color: var(--gold);
-            padding: 10px;
-            background: rgba(212,175,55,0.1);
-            animation: pulse 2s infinite;
-          }
-          @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
-          }
-
-          .continuation-text {
-            padding: 20px;
-            max-height: 350px;
-            overflow-y: auto;
-          }
-          .continuation-text.highlight-mode {
-            background: rgba(0,0,0,0.2);
-          }
-          .cont-ayah {
-            display: inline;
-            position: relative;
-            padding: 4px 2px;
-            border-radius: 4px;
-            transition: all 0.2s ease;
-          }
-          .cont-ayah.clickable {
-            cursor: pointer;
-          }
-          .cont-ayah.clickable:hover {
-            background: rgba(212,175,55,0.1);
-          }
-          .cont-ayah.mistake {
-            background: rgba(231,76,60,0.25);
-            border-radius: 6px;
-          }
-          .cont-ayah.mistake .arabic {
-            color: var(--error);
-          }
-          .mistake-marker {
-            font-size: 12px;
-            color: var(--error);
-            margin-left: 4px;
-            font-weight: bold;
-          }
-          .cont-ayah .arabic {
-            font-size: 22px;
-            line-height: 2.4;
-          }
-          .ayah-num {
-            font-size: 11px;
-            color: var(--gold);
-            margin: 0 6px;
-            font-family: 'Space Grotesk', sans-serif;
-          }
-          
-          .result-prompt {
-            padding: 20px;
-            border-top: 1px solid var(--bg-surface-light);
-            text-align: center;
-          }
-          .result-prompt p {
-            font-size: 14px;
-            color: var(--text-secondary);
-            margin-bottom: 12px;
-          }
-          .mistakes-summary {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: rgba(231,76,60,0.15);
-            color: var(--error);
-            padding: 8px 14px;
-            border-radius: 8px;
-            font-size: 12px;
             margin-bottom: 16px;
           }
-          .result-buttons {
+          .reveal-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+          }
+          .answer-section {
+            background: rgba(46,204,113,0.1);
+            border: 1px solid rgba(46,204,113,0.3);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+          }
+          .answer-section h4 {
+            font-size: 13px;
+            color: var(--success);
+            margin-bottom: 16px;
+            text-align: center;
+          }
+          .continuation-ayahs {
+            max-height: 400px;
+            overflow-y: auto;
+          }
+          .continuation-ayah {
+            display: flex;
+            gap: 12px;
+            padding: 12px;
+            margin-bottom: 8px;
+            background: var(--bg-surface);
+            border-radius: 10px;
+          }
+          .ayah-num {
+            flex-shrink: 0;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--primary);
+            color: var(--gold);
+            border-radius: 50%;
+            font-size: 11px;
+            font-weight: 600;
+          }
+          .ayah-text {
+            font-size: 20px;
+            line-height: 2;
+            text-align: right;
+            flex: 1;
+          }
+          .answer-buttons {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 12px;
           }
-          .result-btn {
+          .answer-btn {
             display: flex;
-            flex-direction: column;
             align-items: center;
-            gap: 6px;
-            padding: 20px;
-            border: 2px solid transparent;
+            justify-content: center;
+            gap: 8px;
+            padding: 16px;
+            border: none;
             border-radius: 14px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-          }
-          .result-btn span {
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 600;
+            cursor: pointer;
           }
-          .result-btn small {
-            font-size: 11px;
-            opacity: 0.7;
-          }
-          .result-btn.pass {
-            background: rgba(46,204,113,0.15);
-            color: var(--success);
-          }
-          .result-btn.pass:hover {
-            border-color: var(--success);
-            background: rgba(46,204,113,0.25);
-          }
-          .result-btn.fail {
-            background: rgba(231,76,60,0.15);
+          .answer-btn.wrong {
+            background: rgba(231,76,60,0.2);
             color: var(--error);
           }
-          .result-btn.fail:hover {
-            border-color: var(--error);
-            background: rgba(231,76,60,0.25);
+          .answer-btn.correct {
+            background: var(--gold);
+            color: var(--bg-primary);
+          }
+          .arabic {
+            direction: rtl;
+            font-family: 'Amiri', 'Traditional Arabic', serif;
           }
         `}</style>
       </div>
     );
   }
 
-  // Results
-  if (state === 'results') {
-    const passedCount = results.filter(r => r.passed).length;
-    const totalCount = questions.length;
-    const percentage = Math.round((passedCount / totalCount) * 100);
-    const { emoji, title, message } = getScoreMessage(percentage);
-    const xpEarned = passedCount * 20;
-    const totalMistakes = results.reduce((sum, r) => sum + (r.mistakeCount || 0), 0);
-    const totalAyahs = results.reduce((sum, r) => sum + (r.totalAyahs || 0), 0);
-
+  // Results Screen
+  if (mode === 'results') {
+    const percentage = Math.round((score.correct / score.total) * 100);
+    const { emoji, message, color } = getScoreMessage(percentage);
+    
     return (
       <div className="quiz-results">
-        <div className="results-card">
+        <div className="results-header" style={{ background: `linear-gradient(135deg, ${color}20 0%, ${color}05 100%)` }}>
           <span className="result-emoji">{emoji}</span>
-          <h2>{title}</h2>
-          <p className="result-msg">{message}</p>
-          
-          <div className="score-display">
-            <div className="score-ring" style={{ '--percent': percentage }}>
-              <span className="score-value">{passedCount}/{totalCount}</span>
-            </div>
-            <span className="score-percent">{percentage}%</span>
+          <h2>{percentage}%</h2>
+          <p className="result-message">{message}</p>
+          <div className="score-breakdown">
+            <span>{score.correct} correct</span>
+            <span>•</span>
+            <span>{score.total - score.correct} incorrect</span>
+            <span>•</span>
+            <span>{score.total} total</span>
           </div>
+        </div>
 
-          <div className="stats-row">
-            <div className="stat passed">
-              <Check size={16} />
-              <span>{passedCount} Passed</span>
-            </div>
-            <div className="stat failed">
-              <X size={16} />
-              <span>{totalCount - passedCount} Failed</span>
-            </div>
-          </div>
-
-          {totalMistakes > 0 && (
-            <div className="mistakes-stat">
-              <AlertCircle size={16} />
-              <span>{totalMistakes} ayah mistake{totalMistakes !== 1 ? 's' : ''} highlighted across {totalAyahs} ayahs</span>
-            </div>
+        <div className="performance-tips">
+          <h3>Tips for Improvement</h3>
+          {percentage < 50 && (
+            <p>Focus on reviewing your memorized sections more frequently. Use the Review tab to strengthen weak areas.</p>
           )}
-
-          <div className="xp-badge">
-            <Award size={20} />
-            <span>+{xpEarned} XP Earned</span>
-          </div>
+          {percentage >= 50 && percentage < 70 && (
+            <p>Good progress! Try connecting ayahs across page boundaries to improve flow.</p>
+          )}
+          {percentage >= 70 && percentage < 90 && (
+            <p>Great work! Challenge yourself with longer recitation lengths.</p>
+          )}
+          {percentage >= 90 && (
+            <p>Excellent mastery! Keep up your daily review to maintain this level.</p>
+          )}
         </div>
 
-        {/* Detailed Breakdown */}
-        <div className="breakdown-card">
-          <h3>Round Breakdown</h3>
-          <div className="breakdown-list">
-            {results.map((r, i) => (
-              <div key={i} className={`breakdown-item ${r.passed ? 'pass' : 'fail'}`}>
-                <div className="breakdown-main">
-                  <span className="round-num">Round {i + 1}</span>
-                  {r.passed ? <Check size={16} /> : <X size={16} />}
-                </div>
-                {r.mistakeCount > 0 && (
-                  <span className="breakdown-mistakes">
-                    {r.mistakeCount} mistake{r.mistakeCount !== 1 ? 's' : ''}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
+        <div className="results-actions">
+          <button className="btn btn-secondary" onClick={() => setMode('setup')}>
+            <RotateCcw size={18} /> New Quiz
+          </button>
+          <button className="btn btn-primary" onClick={generateQuestions}>
+            <Zap size={18} /> Try Again
+          </button>
         </div>
-
-        <button className="btn btn-primary" onClick={() => setState('setup')}>
-          <RotateCcw size={18} /> New Musabaqah
-        </button>
 
         <style>{`
           .quiz-results { animation: fadeIn 0.3s ease-out; }
-          .results-card {
-            background: linear-gradient(135deg, var(--primary) 0%, #1a4a3a 100%);
-            border-radius: 24px;
-            padding: 32px;
+          .results-header {
             text-align: center;
-            margin-bottom: 16px;
+            padding: 40px 20px;
+            border-radius: 20px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
           }
-          .result-emoji { font-size: 56px; display: block; margin-bottom: 16px; }
-          .results-card h2 { font-size: 28px; margin-bottom: 8px; }
-          .result-msg { color: var(--text-secondary); margin-bottom: 24px; }
-          
-          .score-display { margin-bottom: 24px; }
-          .score-ring {
-            width: 120px;
-            height: 120px;
-            border-radius: 50%;
-            background: conic-gradient(var(--gold) calc(var(--percent) * 1%), var(--bg-surface-light) 0);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 12px;
-            position: relative;
-          }
-          .score-ring::before {
-            content: '';
-            position: absolute;
-            width: 90px;
-            height: 90px;
-            background: var(--primary);
-            border-radius: 50%;
-          }
-          .score-value {
-            position: relative;
-            z-index: 1;
-            font-size: 28px;
+          .result-emoji { font-size: 60px; display: block; margin-bottom: 16px; }
+          .results-header h2 {
+            font-size: 56px;
             font-weight: 700;
             font-family: 'Space Grotesk', sans-serif;
+            margin-bottom: 8px;
           }
-          .score-percent {
+          .result-message {
             font-size: 18px;
-            color: var(--gold);
-            font-weight: 600;
-          }
-          
-          .stats-row {
-            display: flex;
-            justify-content: center;
-            gap: 24px;
-            margin-bottom: 16px;
-          }
-          .stat {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 14px;
-          }
-          .stat.passed { color: var(--success); }
-          .stat.failed { color: var(--error); }
-
-          .mistakes-stat {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            background: rgba(231,76,60,0.2);
-            padding: 8px 16px;
-            border-radius: 10px;
-            color: var(--error);
-            font-size: 12px;
-            margin-bottom: 16px;
-          }
-          
-          .xp-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            background: rgba(212,175,55,0.2);
-            padding: 12px 24px;
-            border-radius: 24px;
-            color: var(--gold);
-            font-weight: 600;
-            font-size: 16px;
-          }
-          
-          .breakdown-card {
-            background: var(--bg-surface);
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 16px;
-          }
-          .breakdown-card h3 {
-            font-size: 14px;
             color: var(--text-secondary);
             margin-bottom: 16px;
           }
-          .breakdown-list {
+          .score-breakdown {
             display: flex;
-            flex-direction: column;
-            gap: 8px;
-          }
-          .breakdown-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 14px;
-            border-radius: 10px;
+            justify-content: center;
+            gap: 12px;
             font-size: 13px;
-            font-weight: 500;
+            color: var(--text-muted);
           }
-          .breakdown-main {
+          .performance-tips {
+            background: var(--bg-surface);
+            padding: 20px;
+            border-radius: 16px;
+            margin-bottom: 20px;
+          }
+          .performance-tips h3 {
+            font-size: 14px;
+            color: var(--gold);
+            margin-bottom: 10px;
+          }
+          .performance-tips p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+          }
+          .results-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+          }
+          .btn {
             display: flex;
             align-items: center;
-            gap: 10px;
-          }
-          .round-num {
+            justify-content: center;
+            gap: 8px;
+            padding: 16px;
+            border: none;
+            border-radius: 14px;
+            font-size: 14px;
             font-weight: 600;
+            cursor: pointer;
           }
-          .breakdown-item.pass {
-            background: rgba(46,204,113,0.1);
-            color: var(--success);
+          .btn-primary {
+            background: var(--gold);
+            color: var(--bg-primary);
           }
-          .breakdown-item.fail {
-            background: rgba(231,76,60,0.1);
-            color: var(--error);
+          .btn-secondary {
+            background: var(--bg-surface);
+            color: var(--text-primary);
           }
-          .breakdown-mistakes {
-            font-size: 11px;
-            background: rgba(0,0,0,0.2);
-            padding: 4px 8px;
-            border-radius: 6px;
-          }
-          
-          .btn { width: 100%; }
         `}</style>
       </div>
     );

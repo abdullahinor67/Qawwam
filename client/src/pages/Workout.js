@@ -1,509 +1,835 @@
 import React, { useState, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
-import { Dumbbell, Check, ChevronDown, ChevronUp, Flame, Target, Utensils, Plus, Minus, Scale, TrendingDown } from 'lucide-react';
+import { useAuth, TIERS } from '../context/AuthContext';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { 
+  Dumbbell, Check, ChevronDown, ChevronUp, Target, 
+  Plus, Minus, Scale, TrendingDown, Upload, FileText, Trash2,
+  ToggleLeft, ToggleRight, Lock, Crown, X, Edit2, Loader, Wand2
+} from 'lucide-react';
+import FeatureGate from '../components/FeatureGate';
 
-const WORKOUT_PLAN = [
-  {
-    id: 'day1',
-    day: 'Day 1',
-    name: 'Upper Push',
-    subtitle: 'Chest, Shoulders, Triceps',
-    emoji: '💪',
-    exercises: [
-      { id: 'd1e1', name: 'Bench Press', targetSets: 4, targetReps: '6-10' },
-      { id: 'd1e2', name: 'Incline Dumbbell Press', targetSets: 3, targetReps: '8-12' },
-      { id: 'd1e3', name: 'Overhead Shoulder Press', targetSets: 3, targetReps: '8-12' },
-      { id: 'd1e4', name: 'Lateral Raises', targetSets: 3, targetReps: '12-15' },
-      { id: 'd1e5', name: 'Tricep Pushdowns', targetSets: 3, targetReps: '12-15' },
-      { id: 'd1e6', name: 'Hanging Leg Raises', targetSets: 3, targetReps: '12-15' },
-    ]
-  },
-  {
-    id: 'day2',
-    day: 'Day 2',
-    name: 'Lower Body',
-    subtitle: 'Thighs & Glutes',
-    emoji: '🦵',
-    exercises: [
-      { id: 'd2e1', name: 'Barbell Squats', targetSets: 4, targetReps: '6-10' },
-      { id: 'd2e2', name: 'Romanian Deadlifts', targetSets: 3, targetReps: '8-12' },
-      { id: 'd2e3', name: 'Walking Lunges', targetSets: 3, targetReps: '20 steps' },
-      { id: 'd2e4', name: 'Leg Press', targetSets: 3, targetReps: '12-15' },
-      { id: 'd2e5', name: 'Standing Calf Raises', targetSets: 4, targetReps: '15-20' },
-      { id: 'd2e6', name: 'Plank', targetSets: 3, targetReps: '60 sec' },
-    ]
-  },
-  {
-    id: 'day3',
-    day: 'Day 3',
-    name: 'Cardio + Abs',
-    subtitle: 'Zone 2 + Core',
-    emoji: '🔥',
-    exercises: [
-      { id: 'd3e1', name: 'Incline Treadmill Walk', targetSets: 1, targetReps: '35-45 min' },
-      { id: 'd3e2', name: 'Cable Crunches', targetSets: 3, targetReps: '15' },
-      { id: 'd3e3', name: 'Bicycle Crunches', targetSets: 3, targetReps: '20' },
-      { id: 'd3e4', name: 'Russian Twists', targetSets: 3, targetReps: '20' },
-      { id: 'd3e5', name: 'Ab Wheel', targetSets: 3, targetReps: '10-12' },
-    ]
-  },
-  {
-    id: 'day4',
-    day: 'Day 4',
-    name: 'Upper Pull',
-    subtitle: 'Back & Biceps',
-    emoji: '🏋️',
-    exercises: [
-      { id: 'd4e1', name: 'Pull-Ups / Lat Pulldowns', targetSets: 4, targetReps: '8-12' },
-      { id: 'd4e2', name: 'Barbell Rows', targetSets: 4, targetReps: '8-10' },
-      { id: 'd4e3', name: 'Seated Cable Rows', targetSets: 3, targetReps: '10-12' },
-      { id: 'd4e4', name: 'Face Pulls', targetSets: 3, targetReps: '15' },
-      { id: 'd4e5', name: 'Dumbbell Curls', targetSets: 3, targetReps: '10-12' },
-      { id: 'd4e6', name: 'Hammer Curls', targetSets: 3, targetReps: '12' },
-    ]
-  },
-  {
-    id: 'day5',
-    day: 'Day 5',
-    name: 'Full Body + HIIT',
-    subtitle: 'Strength + Conditioning',
-    emoji: '⚡',
-    exercises: [
-      { id: 'd5e1', name: 'Deadlifts', targetSets: 4, targetReps: '5' },
-      { id: 'd5e2', name: 'Dumbbell Shoulder Press', targetSets: 3, targetReps: '10' },
-      { id: 'd5e3', name: 'Kettlebell Swings', targetSets: 3, targetReps: '20' },
-      { id: 'd5e4', name: 'Battle Ropes', targetSets: 10, targetReps: '30s on/60s off' },
-      { id: 'd5e5', name: 'Mountain Climbers', targetSets: 3, targetReps: '30 sec' },
-    ]
-  },
-  {
-    id: 'day6',
-    day: 'Day 6',
-    name: 'Optional Cardio',
-    subtitle: 'Core & Recovery',
-    emoji: '🧘',
-    exercises: [
-      { id: 'd6e1', name: 'Light Cardio', targetSets: 1, targetReps: '30-45 min' },
-      { id: 'd6e2', name: 'Kegels', targetSets: 10, targetReps: '10 sec hold' },
-      { id: 'd6e3', name: 'Glute Bridges', targetSets: 1, targetReps: '15-20' },
-      { id: 'd6e4', name: 'Dead Bugs', targetSets: 1, targetReps: '12 per side' },
-      { id: 'd6e5', name: 'Plank', targetSets: 1, targetReps: '45-60 sec' },
-    ]
-  },
-  {
-    id: 'day7',
-    day: 'Day 7',
-    name: 'Rest Day',
-    subtitle: 'Recovery',
-    emoji: '😴',
-    exercises: [
-      { id: 'd7e1', name: 'Stretching', targetSets: 1, targetReps: '15-20 min' },
-      { id: 'd7e2', name: 'Light Walking', targetSets: 1, targetReps: '20-30 min' },
-      { id: 'd7e3', name: 'Foam Rolling', targetSets: 1, targetReps: 'As needed' },
-    ]
-  },
-];
+// PDF.js for parsing PDFs
+import * as pdfjsLib from 'pdfjs-dist';
 
-const NUTRITION = {
-  calories: '1,800-1,900',
-  protein: '180g',
-  fat: '50-60g',
-  carbs: 'Remaining',
-};
+// Set worker path
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 function Workout() {
-  const { addXp, workoutStats, updateWeight, completeWorkout } = useApp();
+  const { user, hasAccess, getTier } = useAuth();
+  const tier = getTier();
+  
+  const [workoutEnabled, setWorkoutEnabled] = useState(false);
+  const [customPdf, setCustomPdf] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [parsing, setParsing] = useState(false);
+  
+  // Custom workout plan (user creates their own)
+  const [customPlan, setCustomPlan] = useState([]);
+  const [addingDay, setAddingDay] = useState(false);
+  const [newDayName, setNewDayName] = useState('');
+  const [editingDay, setEditingDay] = useState(null);
+  const [newExercise, setNewExercise] = useState({ name: '', sets: 3, reps: '10' });
   
   const [weightInput, setWeightInput] = useState('');
   const [showWeightInput, setShowWeightInput] = useState(false);
+  const [weightHistory, setWeightHistory] = useState([]);
+  const [currentWeight, setCurrentWeight] = useState(null);
   
-  // Track completed exercises with sets data
-  const [exerciseData, setExerciseData] = useState(() => {
-    const saved = localStorage.getItem('qawaam_exercise_data');
-    const today = new Date().toDateString();
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.date === today) return parsed.data;
-    }
-    return {};
-  });
-
-  const [completedWorkouts, setCompletedWorkouts] = useState(() => {
-    const saved = localStorage.getItem('qawaam_workout_completed');
-    const today = new Date().toDateString();
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.date === today) return parsed.completed;
-    }
-    return {};
-  });
-
+  const [exerciseData, setExerciseData] = useState({});
+  const [completedWorkouts, setCompletedWorkouts] = useState({});
   const [expandedDay, setExpandedDay] = useState(null);
-  const [showNutrition, setShowNutrition] = useState(false);
-  const [currentWeek, setCurrentWeek] = useState(() => {
-    const saved = localStorage.getItem('qawaam_workout_week');
-    return saved ? parseInt(saved) : 1;
-  });
 
-  // Save to localStorage
+  // Load user workout data
   useEffect(() => {
-    localStorage.setItem('qawaam_exercise_data', JSON.stringify({
-      date: new Date().toDateString(),
-      data: exerciseData
-    }));
-  }, [exerciseData]);
+    if (user) {
+      loadWorkoutData();
+    }
+  }, [user]);
 
-  useEffect(() => {
-    localStorage.setItem('qawaam_workout_completed', JSON.stringify({
-      date: new Date().toDateString(),
-      completed: completedWorkouts
-    }));
-  }, [completedWorkouts]);
+  const loadWorkoutData = async () => {
+    setLoading(true);
+    try {
+      const docRef = doc(db, 'users', user.uid, 'fitness', 'workout');
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setWorkoutEnabled(data.enabled || false);
+        setCustomPdf(data.customPdf || null);
+        setCustomPlan(data.customPlan || []);
+        setWeightHistory(data.weightHistory || []);
+        setCurrentWeight(data.currentWeight || null);
+        setExerciseData(data.exerciseData || {});
+        setCompletedWorkouts(data.completedWorkouts || {});
+      }
+    } catch (error) {
+      console.error('Error loading workout data:', error);
+    }
+    setLoading(false);
+  };
 
-  useEffect(() => {
-    localStorage.setItem('qawaam_workout_week', currentWeek.toString());
-  }, [currentWeek]);
+  const saveWorkoutData = async (updates) => {
+    if (!user) return;
+    try {
+      const docRef = doc(db, 'users', user.uid, 'fitness', 'workout');
+      await setDoc(docRef, {
+        enabled: workoutEnabled,
+        customPdf,
+        customPlan,
+        weightHistory,
+        currentWeight,
+        exerciseData,
+        completedWorkouts,
+        ...updates,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (error) {
+      console.error('Error saving workout data:', error);
+    }
+  };
 
-  // Get exercise data for a specific exercise
+  const toggleWorkout = async () => {
+    const newValue = !workoutEnabled;
+    setWorkoutEnabled(newValue);
+    await saveWorkoutData({ enabled: newValue });
+  };
+
+  // Parse PDF and extract workout data
+  const parsePdfContent = async (file) => {
+    setParsing(true);
+    
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      
+      let fullText = '';
+      
+      // Extract text from all pages
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map(item => item.str).join(' ');
+        fullText += pageText + '\n\n';
+      }
+      
+      // Parse the extracted text into workout structure
+      const parsedWorkout = parseWorkoutText(fullText);
+      
+      if (parsedWorkout.length > 0) {
+        setCustomPlan(parsedWorkout);
+        await saveWorkoutData({ customPlan: parsedWorkout });
+        alert(`✅ Found ${parsedWorkout.length} workout days with exercises!`);
+      } else {
+        alert('Could not auto-detect workout structure. You can add days and exercises manually.');
+      }
+      
+    } catch (error) {
+      console.error('Error parsing PDF:', error);
+      alert('Error reading PDF. Please try again or add workouts manually.');
+    }
+    
+    setParsing(false);
+  };
+
+  // Parse workout text into structured data
+  const parseWorkoutText = (text) => {
+    const workoutDays = [];
+    
+    // Common patterns for workout days
+    const dayPatterns = [
+      /(?:Day\s*(\d+)|Week\s*\d+\s*-?\s*Day\s*(\d+))\s*[-:–]?\s*([A-Za-z\s&+\/]+?)(?=\n|Day|\d+\.|$)/gi,
+      /(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s*[-:–]?\s*([A-Za-z\s&+\/]+)/gi,
+      /(Push|Pull|Legs|Upper|Lower|Full Body|Chest|Back|Arms|Shoulders)\s*(?:Day|Workout)?/gi,
+    ];
+    
+    // Common exercise patterns: "Exercise Name: 3x10" or "Exercise Name 3 sets x 10 reps"
+    const exercisePatterns = [
+      /([A-Za-z\s\-()]+?)[\s:]+(\d+)\s*[x×]\s*(\d+[-–]?\d*)/gi,
+      /([A-Za-z\s\-()]+?)[\s:]+(\d+)\s*sets?\s*[,x×]\s*(\d+[-–]?\d*)\s*reps?/gi,
+      /([A-Za-z\s\-()]+?)\s+(\d+)\s+(\d+[-–]?\d*)/gi,
+    ];
+    
+    // Common exercise names to look for
+    const commonExercises = [
+      'Bench Press', 'Incline Press', 'Decline Press', 'Dumbbell Press', 'Chest Press',
+      'Squat', 'Leg Press', 'Lunges', 'Leg Extension', 'Leg Curl', 'Deadlift', 'Romanian Deadlift',
+      'Pull Up', 'Chin Up', 'Lat Pulldown', 'Row', 'Barbell Row', 'Dumbbell Row', 'Cable Row',
+      'Shoulder Press', 'Military Press', 'Lateral Raise', 'Front Raise', 'Face Pull',
+      'Bicep Curl', 'Hammer Curl', 'Preacher Curl', 'Tricep Extension', 'Tricep Pushdown', 'Skull Crusher',
+      'Plank', 'Crunch', 'Sit Up', 'Russian Twist', 'Leg Raise', 'Ab Wheel',
+      'Hip Thrust', 'Glute Bridge', 'Calf Raise', 'Shrug',
+      'Push Up', 'Dip', 'Cable Fly', 'Pec Deck', 'Machine',
+      'HIIT', 'Cardio', 'Running', 'Cycling', 'Elliptical', 'Stairmaster',
+    ];
+    
+    // Split text into lines and analyze
+    const lines = text.split(/\n+/);
+    let currentDay = null;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      
+      // Check for day headers
+      const dayMatch = line.match(/(?:Day\s*(\d+)|Week\s*\d+[^a-z]*Day\s*(\d+))\s*[-:–]?\s*([A-Za-z\s&+\/,]+)?/i);
+      const namedDayMatch = line.match(/(Push|Pull|Legs|Upper|Lower|Full Body|Chest|Back|Arms|Shoulders|Core)\s*(?:Day|Workout|Session)?/i);
+      const weekdayMatch = line.match(/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s*[-:–]?\s*(.+)?/i);
+      
+      if (dayMatch) {
+        const dayNum = dayMatch[1] || dayMatch[2];
+        const dayName = dayMatch[3]?.trim() || `Day ${dayNum}`;
+        currentDay = {
+          id: `day_${Date.now()}_${dayNum}`,
+          name: dayName,
+          exercises: []
+        };
+        workoutDays.push(currentDay);
+        continue;
+      }
+      
+      if (namedDayMatch && !currentDay) {
+        currentDay = {
+          id: `day_${Date.now()}_${workoutDays.length + 1}`,
+          name: namedDayMatch[0].trim(),
+          exercises: []
+        };
+        workoutDays.push(currentDay);
+        continue;
+      }
+      
+      if (weekdayMatch) {
+        const weekday = weekdayMatch[1];
+        const focus = weekdayMatch[2]?.trim() || weekday;
+        currentDay = {
+          id: `day_${Date.now()}_${workoutDays.length + 1}`,
+          name: focus.includes(weekday) ? focus : `${weekday} - ${focus}`,
+          exercises: []
+        };
+        workoutDays.push(currentDay);
+        continue;
+      }
+      
+      // If no current day, try to create one based on content
+      if (!currentDay && workoutDays.length === 0) {
+        // Check if this line looks like it might be starting exercises
+        const hasExercise = commonExercises.some(ex => 
+          line.toLowerCase().includes(ex.toLowerCase())
+        );
+        if (hasExercise) {
+          currentDay = {
+            id: `day_${Date.now()}_1`,
+            name: 'Workout Day 1',
+            exercises: []
+          };
+          workoutDays.push(currentDay);
+        }
+      }
+      
+      // Parse exercises
+      if (currentDay) {
+        // Try to extract exercise with sets and reps
+        const exerciseMatch = line.match(/([A-Za-z\s\-()]+?)[\s:]+(\d+)\s*[x×]\s*(\d+[-–]?\d*)/i);
+        
+        if (exerciseMatch) {
+          const exerciseName = exerciseMatch[1].trim();
+          const sets = parseInt(exerciseMatch[2]);
+          const reps = exerciseMatch[3];
+          
+          // Validate it looks like an exercise
+          if (exerciseName.length > 2 && exerciseName.length < 50 && sets > 0 && sets <= 10) {
+            currentDay.exercises.push({
+              id: `ex_${Date.now()}_${currentDay.exercises.length}`,
+              name: exerciseName,
+              targetSets: sets,
+              targetReps: reps
+            });
+            continue;
+          }
+        }
+        
+        // Check if line contains a common exercise name
+        for (const exercise of commonExercises) {
+          if (line.toLowerCase().includes(exercise.toLowerCase())) {
+            // Try to find sets/reps nearby
+            const setsRepsMatch = line.match(/(\d+)\s*[x×]\s*(\d+[-–]?\d*)/);
+            const sets = setsRepsMatch ? parseInt(setsRepsMatch[1]) : 3;
+            const reps = setsRepsMatch ? setsRepsMatch[2] : '10';
+            
+            // Extract the exercise name more precisely
+            const nameMatch = line.match(new RegExp(`([A-Za-z\\s\\-()]*${exercise}[A-Za-z\\s\\-()]*)`, 'i'));
+            const name = nameMatch ? nameMatch[1].trim() : exercise;
+            
+            // Don't add duplicates
+            if (!currentDay.exercises.some(e => e.name.toLowerCase() === name.toLowerCase())) {
+              currentDay.exercises.push({
+                id: `ex_${Date.now()}_${currentDay.exercises.length}`,
+                name: name,
+                targetSets: sets,
+                targetReps: reps
+              });
+            }
+            break;
+          }
+        }
+      }
+    }
+    
+    // Filter out days with no exercises
+    return workoutDays.filter(day => day.exercises.length > 0);
+  };
+
+  const handlePdfUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf') {
+      alert('Please upload a PDF file');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size must be less than 10MB');
+      return;
+    }
+
+    const pdfData = {
+      name: file.name,
+      size: file.size,
+      uploadedAt: new Date().toISOString()
+    };
+    setCustomPdf(pdfData);
+    await saveWorkoutData({ customPdf: pdfData });
+    
+    // Parse the PDF
+    await parsePdfContent(file);
+  };
+
+  const handleRemovePdf = async () => {
+    if (window.confirm('Remove PDF and all workout data?')) {
+      setCustomPdf(null);
+      setCustomPlan([]);
+      setExerciseData({});
+      setCompletedWorkouts({});
+      await saveWorkoutData({ 
+        customPdf: null, 
+        customPlan: [], 
+        exerciseData: {},
+        completedWorkouts: {}
+      });
+    }
+  };
+
+  // Add a new workout day
+  const addWorkoutDay = async () => {
+    if (!newDayName.trim()) return;
+    
+    const newDay = {
+      id: `day_${Date.now()}`,
+      name: newDayName.trim(),
+      exercises: []
+    };
+    
+    const updatedPlan = [...customPlan, newDay];
+    setCustomPlan(updatedPlan);
+    setNewDayName('');
+    setAddingDay(false);
+    await saveWorkoutData({ customPlan: updatedPlan });
+  };
+
+  // Delete a workout day
+  const deleteWorkoutDay = async (dayId) => {
+    if (!window.confirm('Delete this workout day?')) return;
+    
+    const updatedPlan = customPlan.filter(d => d.id !== dayId);
+    setCustomPlan(updatedPlan);
+    await saveWorkoutData({ customPlan: updatedPlan });
+  };
+
+  // Add exercise to a day
+  const addExerciseToDay = async (dayId) => {
+    if (!newExercise.name.trim()) return;
+    
+    const exercise = {
+      id: `ex_${Date.now()}`,
+      name: newExercise.name.trim(),
+      targetSets: parseInt(newExercise.sets),
+      targetReps: newExercise.reps
+    };
+    
+    const updatedPlan = customPlan.map(day => {
+      if (day.id === dayId) {
+        return { ...day, exercises: [...day.exercises, exercise] };
+      }
+      return day;
+    });
+    
+    setCustomPlan(updatedPlan);
+    setNewExercise({ name: '', sets: 3, reps: '10' });
+    await saveWorkoutData({ customPlan: updatedPlan });
+  };
+
+  // Delete exercise from a day
+  const deleteExercise = async (dayId, exerciseId) => {
+    const updatedPlan = customPlan.map(day => {
+      if (day.id === dayId) {
+        return { ...day, exercises: day.exercises.filter(e => e.id !== exerciseId) };
+      }
+      return day;
+    });
+    
+    setCustomPlan(updatedPlan);
+    await saveWorkoutData({ customPlan: updatedPlan });
+  };
+
+  const handleWeightLog = async () => {
+    if (!weightInput) return;
+    
+    const weight = parseFloat(weightInput);
+    const newHistory = [...weightHistory, { weight, date: new Date().toISOString() }];
+    
+    setWeightHistory(newHistory);
+    setCurrentWeight(weight);
+    setWeightInput('');
+    setShowWeightInput(false);
+    
+    await saveWorkoutData({ 
+      weightHistory: newHistory, 
+      currentWeight: weight 
+    });
+  };
+
   const getExerciseData = (exerciseId) => {
     return exerciseData[exerciseId] || { completed: false, sets: [] };
   };
 
-  // Toggle exercise completion
-  const toggleExercise = (exerciseId, targetSets) => {
-    setExerciseData(prev => {
-      const current = prev[exerciseId] || { completed: false, sets: [] };
-      
-      if (current.completed) {
-        // Uncheck - clear data
-        return {
-          ...prev,
-          [exerciseId]: { completed: false, sets: [] }
-        };
-      } else {
-        // Check - initialize with empty sets if none
-        const sets = current.sets.length > 0 
-          ? current.sets 
-          : Array(targetSets).fill({ reps: '', weight: '' });
-        return {
-          ...prev,
-          [exerciseId]: { completed: true, sets }
-        };
+  const toggleExercise = async (exerciseId, targetSets) => {
+    const current = exerciseData[exerciseId] || { completed: false, sets: [] };
+    const newData = {
+      ...exerciseData,
+      [exerciseId]: {
+        completed: !current.completed,
+        sets: current.completed ? [] : Array(targetSets).fill({ reps: '', weight: '' })
       }
-    });
+    };
+    setExerciseData(newData);
+    await saveWorkoutData({ exerciseData: newData });
   };
 
-  // Update set data
-  const updateSet = (exerciseId, setIndex, field, value) => {
-    setExerciseData(prev => {
-      const current = prev[exerciseId] || { completed: true, sets: [] };
-      const newSets = [...current.sets];
-      newSets[setIndex] = { ...newSets[setIndex], [field]: value };
-      return {
-        ...prev,
-        [exerciseId]: { ...current, sets: newSets }
-      };
-    });
+  const updateSet = async (exerciseId, setIndex, field, value) => {
+    const current = exerciseData[exerciseId] || { completed: true, sets: [] };
+    const newSets = [...current.sets];
+    newSets[setIndex] = { ...newSets[setIndex], [field]: value };
+    
+    const newData = {
+      ...exerciseData,
+      [exerciseId]: { ...current, sets: newSets }
+    };
+    setExerciseData(newData);
   };
 
-  // Add a set
-  const addSet = (exerciseId) => {
-    setExerciseData(prev => {
-      const current = prev[exerciseId] || { completed: true, sets: [] };
-      return {
-        ...prev,
-        [exerciseId]: {
-          ...current,
-          sets: [...current.sets, { reps: '', weight: '' }]
-        }
-      };
-    });
+  const isDayComplete = (day) => {
+    return day.exercises.length > 0 && day.exercises.every(ex => getExerciseData(ex.id).completed);
   };
 
-  // Remove a set
-  const removeSet = (exerciseId, setIndex) => {
-    setExerciseData(prev => {
-      const current = prev[exerciseId] || { completed: true, sets: [] };
-      const newSets = current.sets.filter((_, i) => i !== setIndex);
-      return {
-        ...prev,
-        [exerciseId]: { ...current, sets: newSets }
-      };
-    });
+  const markDayComplete = async (dayId) => {
+    const today = new Date().toDateString();
+    const newCompleted = { 
+      ...completedWorkouts, 
+      [dayId]: [...(completedWorkouts[dayId] || []), today]
+    };
+    setCompletedWorkouts(newCompleted);
+    await saveWorkoutData({ completedWorkouts: newCompleted });
   };
 
-  // Check if all exercises in a day are complete
-  const isDayComplete = (dayId) => {
-    const day = WORKOUT_PLAN.find(d => d.id === dayId);
-    if (!day) return false;
-    return day.exercises.every(ex => getExerciseData(ex.id).completed);
-  };
+  const startWeight = weightHistory[0]?.weight;
+  const weightLost = startWeight && currentWeight ? (startWeight - currentWeight).toFixed(1) : null;
 
-  // Mark day as complete
-  const markDayComplete = (dayId) => {
-    if (!completedWorkouts[dayId]) {
-      setCompletedWorkouts(prev => ({ ...prev, [dayId]: true }));
-      addXp(50);
-    }
-  };
+  // Check if user has access to workout
+  if (!hasAccess('workout')) {
+    return (
+      <div className="workout-page">
+        <header className="page-header">
+          <h1>💪 Workout</h1>
+          <p className="subtitle">Track your fitness journey</p>
+        </header>
+        <FeatureGate feature="workout">
+          <div style={{ minHeight: 400 }} />
+        </FeatureGate>
+      </div>
+    );
+  }
 
-  // Get count of completed exercises for a day
-  const getCompletedCount = (dayId) => {
-    const day = WORKOUT_PLAN.find(d => d.id === dayId);
-    if (!day) return 0;
-    return day.exercises.filter(ex => getExerciseData(ex.id).completed).length;
-  };
+  if (loading) {
+    return (
+      <div className="workout-page">
+        <div className="loading-state">
+          <div className="spinner" />
+          <p>Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
-  const getTodayWorkout = () => {
-    const dayOfWeek = new Date().getDay();
-    const dayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    return WORKOUT_PLAN[dayIndex];
-  };
+  // Workout not enabled - show enable screen
+  if (!workoutEnabled) {
+    return (
+      <div className="workout-page">
+        <header className="page-header">
+          <h1>💪 Workout</h1>
+          <p className="subtitle">Track your fitness journey</p>
+        </header>
 
-  const todayWorkout = getTodayWorkout();
-  const completedDays = Object.keys(completedWorkouts).length;
-  const todayCompleted = completedWorkouts[todayWorkout.id];
-  const todayExercisesCompleted = getCompletedCount(todayWorkout.id);
-  const todayAllExercisesDone = isDayComplete(todayWorkout.id);
+        <div className="enable-card">
+          <Dumbbell size={48} className="enable-icon" />
+          <h2>Enable Workout Tracking?</h2>
+          <p>Import your workout PDF and we'll automatically create your training checklist.</p>
+          
+          <button className="btn btn-primary enable-btn" onClick={toggleWorkout}>
+            <ToggleRight size={20} />
+            Enable Workout
+          </button>
+        </div>
+
+        <style>{`
+          .workout-page {
+            padding: 20px;
+            padding-bottom: 100px;
+          }
+          .page-header h1 { font-size: 28px; margin-bottom: 4px; }
+          .subtitle { color: var(--text-muted); font-size: 14px; }
+          .enable-card {
+            background: var(--bg-surface);
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            margin-top: 40px;
+          }
+          .enable-icon {
+            color: var(--gold);
+            margin-bottom: 20px;
+          }
+          .enable-card h2 {
+            font-size: 22px;
+            margin-bottom: 12px;
+          }
+          .enable-card p {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin-bottom: 24px;
+            max-width: 300px;
+            margin-left: auto;
+            margin-right: auto;
+          }
+          .enable-btn {
+            padding: 16px 32px;
+            font-size: 16px;
+          }
+          .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+          }
+          .btn-primary {
+            background: var(--gold);
+            color: var(--bg-primary);
+          }
+          .loading-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 300px;
+          }
+          .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--bg-surface-light);
+            border-top-color: var(--gold);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+          }
+          @keyframes spin { to { transform: rotate(360deg); } }
+        `}</style>
+      </div>
+    );
+  }
 
   return (
     <div className="workout-page">
       <header className="page-header">
         <div className="header-content">
           <h1>💪 Workout</h1>
-          <p className="subtitle">2-Month Aggressive Fat Loss Plan</p>
+          <p className="subtitle">Your Custom Training Plan</p>
         </div>
-        <div className="week-badge">
-          Week {currentWeek}/8
-        </div>
+        <button className="disable-btn" onClick={toggleWorkout} title="Disable Workout">
+          <ToggleLeft size={18} />
+        </button>
       </header>
 
-      {/* Goal Card */}
-      <div className="goal-card">
-        <Target size={20} />
-        <div className="goal-info">
-          <span className="goal-label">Goal</span>
-          <span className="goal-text">170-175 lbs • Visible Abs • High Stamina</span>
-        </div>
-      </div>
-
-      {/* Weight Tracker */}
-      <div className="weight-tracker">
-        <div className="weight-header">
-          <Scale size={18} />
-          <h3>Weight Tracker</h3>
-          <button 
-            className="log-weight-btn"
-            onClick={() => setShowWeightInput(!showWeightInput)}
-          >
-            {showWeightInput ? 'Cancel' : '+ Log Weight'}
-          </button>
+      {/* PDF Upload Section */}
+      <div className="pdf-section">
+        <div className="pdf-header">
+          <Wand2 size={18} />
+          <span>Auto-Scan Workout PDF</span>
         </div>
         
-        {showWeightInput && (
-          <div className="weight-input-row">
-            <input
-              type="number"
-              placeholder="Enter weight"
-              value={weightInput}
-              onChange={(e) => setWeightInput(e.target.value)}
-              step="0.1"
-            />
-            <span>lbs</span>
-            <button 
-              className="save-weight-btn"
-              onClick={() => {
-                if (weightInput) {
-                  updateWeight(parseFloat(weightInput));
-                  setWeightInput('');
-                  setShowWeightInput(false);
-                }
-              }}
-            >
-              Save
+        {customPdf ? (
+          <div className="pdf-uploaded">
+            <div className="pdf-info">
+              <span className="pdf-name">{customPdf.name}</span>
+              <span className="pdf-date">Uploaded {new Date(customPdf.uploadedAt).toLocaleDateString()}</span>
+            </div>
+            <button className="remove-pdf-btn" onClick={handleRemovePdf}>
+              <Trash2 size={16} />
             </button>
           </div>
-        )}
-
-        <div className="weight-stats">
-          <div className="weight-stat">
-            <span className="weight-value">{workoutStats?.currentWeight || '--'}</span>
-            <span className="weight-label">Current</span>
-          </div>
-          <div className="weight-stat">
-            <span className="weight-value">{workoutStats?.startWeight || '--'}</span>
-            <span className="weight-label">Start</span>
-          </div>
-          <div className="weight-stat">
-            <span className="weight-value">
-              {workoutStats?.startWeight && workoutStats?.currentWeight 
-                ? (workoutStats.startWeight - workoutStats.currentWeight).toFixed(1)
-                : '--'}
-            </span>
-            <span className="weight-label">Lost</span>
-          </div>
-        </div>
-
-        {workoutStats?.weightHistory?.length > 1 && (
-          <div className="weight-trend">
-            <TrendingDown size={14} />
-            <span>
-              {workoutStats.weightHistory.length} weigh-ins tracked
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Today's Workout */}
-      <div className={`today-workout ${todayCompleted ? 'completed' : ''}`}>
-        <div className="today-header">
-          <div>
-            <h2>Today: {todayWorkout.name}</h2>
-            <p>{todayWorkout.subtitle}</p>
-          </div>
-          <span className="today-progress">
-            {todayExercisesCompleted}/{todayWorkout.exercises.length}
-          </span>
-        </div>
-
-        {/* Today's Exercise List */}
-        <div className="today-exercises-list">
-          {todayWorkout.exercises.map((exercise) => {
-            const data = getExerciseData(exercise.id);
-            return (
-              <div key={exercise.id} className={`exercise-item ${data.completed ? 'done' : ''}`}>
-                <div className="exercise-header" onClick={() => toggleExercise(exercise.id, exercise.targetSets)}>
-                  <div className={`exercise-check ${data.completed ? 'checked' : ''}`}>
-                    {data.completed && <Check size={14} />}
-                  </div>
-                  <div className="exercise-info">
-                    <span className="exercise-name">{exercise.name}</span>
-                    <span className="exercise-target">{exercise.targetSets} sets × {exercise.targetReps}</span>
-                  </div>
-                </div>
-
-                {/* Set Tracking */}
-                {data.completed && (
-                  <div className="sets-tracker">
-                    {data.sets.map((set, i) => (
-                      <div key={i} className="set-row">
-                        <span className="set-num">Set {i + 1}</span>
-                        <div className="set-inputs">
-                          <div className="input-group">
-                            <input
-                              type="number"
-                              placeholder="Reps"
-                              value={set.reps}
-                              onChange={(e) => updateSet(exercise.id, i, 'reps', e.target.value)}
-                            />
-                            <span>reps</span>
-                          </div>
-                          <div className="input-group">
-                            <input
-                              type="number"
-                              placeholder="Weight"
-                              value={set.weight}
-                              onChange={(e) => updateSet(exercise.id, i, 'weight', e.target.value)}
-                            />
-                            <span>lbs</span>
-                          </div>
-                        </div>
-                        {data.sets.length > 1 && (
-                          <button className="remove-set" onClick={() => removeSet(exercise.id, i)}>
-                            <Minus size={14} />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    <button className="add-set-btn" onClick={() => addSet(exercise.id)}>
-                      <Plus size={14} /> Add Set
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Complete Day Button */}
-        {!todayCompleted && (
-          <button 
-            className={`complete-day-btn ${todayAllExercisesDone ? 'ready' : 'disabled'}`}
-            onClick={() => todayAllExercisesDone && markDayComplete(todayWorkout.id)}
-            disabled={!todayAllExercisesDone}
-          >
-            {todayAllExercisesDone ? (
-              <><Check size={18} /> Mark Day Complete (+50 XP)</>
+        ) : (
+          <label className={`upload-pdf-btn ${parsing ? 'parsing' : ''}`}>
+            {parsing ? (
+              <>
+                <Loader size={16} className="spin" />
+                <span>Scanning PDF...</span>
+              </>
             ) : (
-              <><Dumbbell size={18} /> Complete all exercises first</>
+              <>
+                <Upload size={16} />
+                <span>Upload Workout PDF</span>
+              </>
             )}
-          </button>
+            <input type="file" accept=".pdf" onChange={handlePdfUpload} hidden disabled={parsing} />
+          </label>
         )}
-
-        {todayCompleted && (
-          <div className="day-completed-badge">
-            <Check size={20} />
-            <span>Day Complete! +50 XP</span>
-          </div>
-        )}
+        
+        <p className="pdf-hint">
+          📄 Upload your workout PDF and we'll auto-create your exercise checklist
+        </p>
       </div>
 
-      {/* Weekly Progress */}
-      <div className="weekly-progress">
-        <h3>This Week</h3>
-        <div className="progress-dots">
-          {WORKOUT_PLAN.map((day) => (
-            <div 
-              key={day.id}
-              className={`day-dot ${completedWorkouts[day.id] ? 'completed' : ''} ${day.id === todayWorkout.id ? 'today' : ''}`}
-              title={day.name}
-              onClick={() => setExpandedDay(expandedDay === day.id ? null : day.id)}
+      {/* Weight Tracker - Pro+ Only */}
+      {tier === TIERS.PRO_PLUS ? (
+        <div className="weight-tracker">
+          <div className="weight-header">
+            <Scale size={18} />
+            <h3>Weight Tracker</h3>
+            <button 
+              className="log-weight-btn"
+              onClick={() => setShowWeightInput(!showWeightInput)}
             >
-              {day.emoji}
+              {showWeightInput ? 'Cancel' : '+ Log'}
+            </button>
+          </div>
+          
+          {showWeightInput && (
+            <div className="weight-input-row">
+              <input
+                type="number"
+                placeholder="Weight"
+                value={weightInput}
+                onChange={(e) => setWeightInput(e.target.value)}
+                step="0.1"
+              />
+              <span>lbs</span>
+              <button className="save-weight-btn" onClick={handleWeightLog}>Save</button>
             </div>
-          ))}
+          )}
+
+          <div className="weight-stats">
+            <div className="weight-stat">
+              <span className="weight-value">{currentWeight || '--'}</span>
+              <span className="weight-label">Current</span>
+            </div>
+            <div className="weight-stat">
+              <span className="weight-value">{startWeight || '--'}</span>
+              <span className="weight-label">Start</span>
+            </div>
+            <div className="weight-stat">
+              <span className="weight-value">{weightLost && weightLost > 0 ? `-${weightLost}` : '--'}</span>
+              <span className="weight-label">Lost</span>
+            </div>
+          </div>
         </div>
-        <p className="progress-text">{completedDays}/7 days completed</p>
-      </div>
-
-      {/* Nutrition Toggle */}
-      <button className="nutrition-toggle" onClick={() => setShowNutrition(!showNutrition)}>
-        <Utensils size={18} />
-        <span>Daily Nutrition Targets</span>
-        {showNutrition ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-      </button>
-
-      {showNutrition && (
-        <div className="nutrition-card">
-          <div className="macro">
-            <span className="macro-value">{NUTRITION.calories}</span>
-            <span className="macro-label">Calories</span>
-          </div>
-          <div className="macro">
-            <span className="macro-value">{NUTRITION.protein}</span>
-            <span className="macro-label">Protein</span>
-          </div>
-          <div className="macro">
-            <span className="macro-value">{NUTRITION.fat}</span>
-            <span className="macro-label">Fat</span>
-          </div>
-          <div className="macro">
-            <span className="macro-value">{NUTRITION.carbs}</span>
-            <span className="macro-label">Carbs</span>
-          </div>
+      ) : (
+        <div className="weight-locked">
+          <Lock size={16} />
+          <span>Weight tracking available in Pro+</span>
+          <a href="/pricing">Upgrade</a>
         </div>
       )}
 
-      {/* Tips */}
-      <div className="tips-card">
-        <h3>💡 Key Reminders</h3>
-        <ul>
-          <li>Sleep 7-8 hours for recovery & hormones</li>
-          <li>Drink 3-4 liters of water daily</li>
-          <li>Track weight daily, use weekly averages</li>
-          <li>Visible abs appear around 12-14% body fat</li>
-          <li>Consistency for 8 weeks = transformation</li>
-        </ul>
+      {/* Custom Workout Plan */}
+      <div className="workout-plan">
+        <div className="plan-header">
+          <h3>Your Workout Plan</h3>
+          <button className="add-day-btn" onClick={() => setAddingDay(true)}>
+            <Plus size={16} /> Add Day
+          </button>
+        </div>
+
+        {addingDay && (
+          <div className="add-day-form">
+            <input
+              type="text"
+              placeholder="Day name (e.g., Push Day, Leg Day)"
+              value={newDayName}
+              onChange={(e) => setNewDayName(e.target.value)}
+              autoFocus
+            />
+            <div className="add-day-actions">
+              <button className="btn btn-secondary" onClick={() => { setAddingDay(false); setNewDayName(''); }}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={addWorkoutDay}>
+                Add Day
+              </button>
+            </div>
+          </div>
+        )}
+
+        {customPlan.length === 0 ? (
+          <div className="empty-plan">
+            <Dumbbell size={40} />
+            <h4>No Workout Days Yet</h4>
+            <p>Upload your PDF to auto-generate, or add days manually</p>
+          </div>
+        ) : (
+          <div className="days-list">
+            {customPlan.map((day) => {
+              const isExpanded = expandedDay === day.id;
+              const dayComplete = isDayComplete(day);
+              const completedCount = day.exercises.filter(ex => getExerciseData(ex.id).completed).length;
+              const completionHistory = completedWorkouts[day.id] || [];
+              
+              return (
+                <div key={day.id} className={`day-card ${dayComplete ? 'completed' : ''}`}>
+                  <div className="day-header" onClick={() => setExpandedDay(isExpanded ? null : day.id)}>
+                    <div className="day-info">
+                      <h4>{day.name}</h4>
+                      <span className="exercise-count">
+                        {completedCount}/{day.exercises.length} exercises
+                        {completionHistory.length > 0 && (
+                          <span className="completion-badge">✓ {completionHistory.length}x</span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="day-actions">
+                      {dayComplete && <Check size={18} className="complete-icon" />}
+                      {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="day-content">
+                      {day.exercises.length === 0 ? (
+                        <p className="no-exercises">No exercises added yet</p>
+                      ) : (
+                        <div className="exercises-list">
+                          {day.exercises.map((exercise) => {
+                            const data = getExerciseData(exercise.id);
+                            return (
+                              <div key={exercise.id} className={`exercise-item ${data.completed ? 'done' : ''}`}>
+                                <div className="exercise-header" onClick={() => toggleExercise(exercise.id, exercise.targetSets)}>
+                                  <div className={`exercise-check ${data.completed ? 'checked' : ''}`}>
+                                    {data.completed && <Check size={14} />}
+                                  </div>
+                                  <div className="exercise-info">
+                                    <span className="exercise-name">{exercise.name}</span>
+                                    <span className="exercise-target">{exercise.targetSets} × {exercise.targetReps}</span>
+                                  </div>
+                                  <button 
+                                    className="delete-exercise"
+                                    onClick={(e) => { e.stopPropagation(); deleteExercise(day.id, exercise.id); }}
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+
+                                {data.completed && (
+                                  <div className="sets-tracker">
+                                    {data.sets.map((set, i) => (
+                                      <div key={i} className="set-row">
+                                        <span className="set-num">Set {i + 1}</span>
+                                        <div className="set-inputs">
+                                          <input
+                                            type="number"
+                                            placeholder="Reps"
+                                            value={set.reps}
+                                            onChange={(e) => updateSet(exercise.id, i, 'reps', e.target.value)}
+                                          />
+                                          <input
+                                            type="number"
+                                            placeholder="lbs"
+                                            value={set.weight}
+                                            onChange={(e) => updateSet(exercise.id, i, 'weight', e.target.value)}
+                                          />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Add Exercise Form */}
+                      {editingDay === day.id ? (
+                        <div className="add-exercise-form">
+                          <input
+                            type="text"
+                            placeholder="Exercise name"
+                            value={newExercise.name}
+                            onChange={(e) => setNewExercise(p => ({ ...p, name: e.target.value }))}
+                          />
+                          <div className="exercise-params">
+                            <input
+                              type="number"
+                              placeholder="Sets"
+                              value={newExercise.sets}
+                              onChange={(e) => setNewExercise(p => ({ ...p, sets: e.target.value }))}
+                            />
+                            <input
+                              type="text"
+                              placeholder="Reps"
+                              value={newExercise.reps}
+                              onChange={(e) => setNewExercise(p => ({ ...p, reps: e.target.value }))}
+                            />
+                          </div>
+                          <div className="add-exercise-actions">
+                            <button className="btn btn-secondary" onClick={() => setEditingDay(null)}>Cancel</button>
+                            <button className="btn btn-primary" onClick={() => { addExerciseToDay(day.id); setEditingDay(null); }}>Add</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button className="add-exercise-btn" onClick={() => setEditingDay(day.id)}>
+                          <Plus size={14} /> Add Exercise
+                        </button>
+                      )}
+
+                      <div className="day-footer">
+                        {dayComplete && (
+                          <button className="complete-day-btn" onClick={() => markDayComplete(day.id)}>
+                            <Check size={16} /> Mark Day Complete
+                          </button>
+                        )}
+                        <button className="delete-day-btn" onClick={() => deleteWorkoutDay(day.id)}>
+                          <Trash2 size={14} /> Delete Day
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <style>{`
@@ -517,41 +843,89 @@ function Workout() {
           align-items: flex-start;
           margin-bottom: 20px;
         }
-        .page-header h1 {
-          font-size: 28px;
-          margin-bottom: 4px;
-        }
-        .subtitle {
-          color: var(--gold);
-          font-size: 13px;
-          font-weight: 500;
-        }
-        .week-badge {
-          background: var(--primary);
-          padding: 8px 14px;
-          border-radius: 20px;
-          font-size: 12px;
-          font-weight: 600;
-        }
-        .goal-card {
+        .page-header h1 { font-size: 28px; margin-bottom: 4px; }
+        .subtitle { color: var(--gold); font-size: 13px; font-weight: 500; }
+        .disable-btn {
+          background: var(--bg-surface);
+          border: none;
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
+          color: var(--text-muted);
+          cursor: pointer;
           display: flex;
           align-items: center;
-          gap: 12px;
-          background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
-          padding: 16px;
-          border-radius: 12px;
+          justify-content: center;
+        }
+        
+        .pdf-section {
+          background: linear-gradient(135deg, var(--primary) 0%, #1a4a3a 100%);
+          border-radius: 16px;
+          padding: 20px;
           margin-bottom: 16px;
         }
-        .goal-label {
-          font-size: 11px;
-          color: var(--text-secondary);
-          text-transform: uppercase;
-          letter-spacing: 1px;
-          display: block;
+        .pdf-header {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 14px;
+          font-size: 15px;
+          font-weight: 600;
+          color: var(--gold);
         }
-        .goal-text {
+        .pdf-uploaded {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 14px;
+          background: rgba(0,0,0,0.2);
+          border-radius: 12px;
+        }
+        .pdf-name { font-size: 14px; display: block; }
+        .pdf-date { font-size: 11px; color: var(--text-muted); }
+        .remove-pdf-btn {
+          background: rgba(231,76,60,0.3);
+          border: none;
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
+          color: var(--error);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .upload-pdf-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          width: 100%;
+          padding: 16px;
+          background: rgba(0,0,0,0.2);
+          border: 2px dashed var(--gold);
+          border-radius: 12px;
+          color: var(--gold);
           font-size: 14px;
           font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        .upload-pdf-btn:hover {
+          background: rgba(212,175,55,0.1);
+        }
+        .upload-pdf-btn.parsing {
+          border-style: solid;
+          cursor: not-allowed;
+        }
+        .spin {
+          animation: spin 1s linear infinite;
+        }
+        .pdf-hint {
+          font-size: 12px;
+          color: var(--text-secondary);
+          margin-top: 12px;
+          text-align: center;
         }
         
         .weight-tracker {
@@ -566,10 +940,7 @@ function Workout() {
           gap: 10px;
           margin-bottom: 14px;
         }
-        .weight-header h3 {
-          flex: 1;
-          font-size: 15px;
-        }
+        .weight-header h3 { flex: 1; font-size: 15px; }
         .log-weight-btn {
           background: var(--primary);
           border: none;
@@ -585,24 +956,15 @@ function Workout() {
           align-items: center;
           gap: 10px;
           margin-bottom: 14px;
-          animation: fadeIn 0.2s ease-out;
         }
         .weight-input-row input {
           flex: 1;
           padding: 12px;
           background: var(--bg-surface-light);
-          border: 1px solid var(--bg-surface-light);
+          border: none;
           border-radius: 8px;
           color: var(--text-primary);
           font-size: 16px;
-        }
-        .weight-input-row input:focus {
-          outline: none;
-          border-color: var(--gold);
-        }
-        .weight-input-row span {
-          color: var(--text-muted);
-          font-size: 14px;
         }
         .save-weight-btn {
           background: var(--gold);
@@ -628,86 +990,177 @@ function Workout() {
           display: block;
           font-size: 22px;
           font-weight: 700;
-          font-family: 'Space Grotesk', sans-serif;
           color: var(--gold);
         }
-        .weight-label {
-          font-size: 11px;
-          color: var(--text-muted);
-        }
-        .weight-trend {
+        .weight-label { font-size: 11px; color: var(--text-muted); }
+        .weight-locked {
           display: flex;
           align-items: center;
-          justify-content: center;
-          gap: 6px;
-          margin-top: 12px;
-          font-size: 12px;
-          color: var(--success);
+          gap: 8px;
+          padding: 14px;
+          background: var(--bg-surface);
+          border-radius: 12px;
+          margin-bottom: 16px;
+          font-size: 13px;
+          color: var(--text-muted);
+        }
+        .weight-locked a {
+          margin-left: auto;
+          color: var(--gold);
+          text-decoration: none;
+          font-weight: 600;
         }
         
-        .today-workout {
+        .workout-plan {
           background: var(--bg-surface);
           border-radius: 16px;
           padding: 20px;
-          margin-bottom: 16px;
-          border-left: 4px solid var(--gold);
         }
-        .today-workout.completed {
-          border-left-color: var(--success);
-        }
-        .today-header {
+        .plan-header {
           display: flex;
           justify-content: space-between;
-          align-items: flex-start;
+          align-items: center;
           margin-bottom: 16px;
         }
-        .today-header h2 {
-          font-size: 18px;
-          margin-bottom: 4px;
+        .plan-header h3 { font-size: 16px; }
+        .add-day-btn {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: var(--primary);
+          border: none;
+          padding: 10px 16px;
+          border-radius: 10px;
+          color: var(--gold);
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
         }
-        .today-header p {
+        .add-day-form {
+          background: var(--bg-surface-light);
+          padding: 16px;
+          border-radius: 12px;
+          margin-bottom: 16px;
+        }
+        .add-day-form input {
+          width: 100%;
+          padding: 12px;
+          background: var(--bg-primary);
+          border: none;
+          border-radius: 8px;
+          color: var(--text-primary);
+          font-size: 14px;
+          margin-bottom: 12px;
+        }
+        .add-day-actions {
+          display: flex;
+          gap: 10px;
+          justify-content: flex-end;
+        }
+        .btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 10px 16px;
+          border: none;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .btn-primary {
+          background: var(--gold);
+          color: var(--bg-primary);
+        }
+        .btn-secondary {
+          background: var(--bg-surface);
+          color: var(--text-secondary);
+        }
+        
+        .empty-plan {
+          text-align: center;
+          padding: 40px 20px;
+        }
+        .empty-plan svg { color: var(--text-muted); margin-bottom: 16px; }
+        .empty-plan h4 { margin-bottom: 8px; }
+        .empty-plan p { color: var(--text-muted); font-size: 13px; }
+        
+        .days-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .day-card {
+          background: var(--bg-surface-light);
+          border-radius: 14px;
+          overflow: hidden;
+          border-left: 4px solid var(--text-muted);
+        }
+        .day-card.completed { border-left-color: var(--success); }
+        .day-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 16px;
+          cursor: pointer;
+        }
+        .day-info h4 { font-size: 15px; margin-bottom: 2px; }
+        .exercise-count { font-size: 12px; color: var(--text-muted); }
+        .completion-badge {
+          display: inline-block;
+          margin-left: 8px;
+          padding: 2px 8px;
+          background: var(--success);
+          color: white;
+          border-radius: 10px;
+          font-size: 10px;
+          font-weight: 600;
+        }
+        .day-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: var(--text-muted);
+        }
+        .complete-icon { color: var(--success); }
+        .day-content {
+          padding: 0 16px 16px;
+          border-top: 1px solid var(--bg-primary);
+        }
+        .no-exercises {
+          text-align: center;
+          padding: 20px;
           color: var(--text-muted);
           font-size: 13px;
         }
-        .today-progress {
-          background: var(--primary);
-          padding: 6px 12px;
-          border-radius: 20px;
-          font-size: 13px;
-          font-weight: 600;
-          color: var(--gold);
-        }
-
-        .today-exercises-list {
+        .exercises-list {
           display: flex;
           flex-direction: column;
           gap: 8px;
-          margin-bottom: 16px;
+          margin-bottom: 12px;
         }
         .exercise-item {
-          background: var(--bg-surface-light);
-          border-radius: 12px;
+          background: var(--bg-primary);
+          border-radius: 10px;
           overflow: hidden;
         }
-        .exercise-item.done {
-          border-left: 3px solid var(--success);
-        }
+        .exercise-item.done { border-left: 3px solid var(--success); }
         .exercise-header {
           display: flex;
           align-items: center;
           gap: 12px;
-          padding: 14px;
+          padding: 12px;
           cursor: pointer;
         }
         .exercise-check {
-          width: 24px;
-          height: 24px;
+          width: 22px;
+          height: 22px;
           border: 2px solid var(--text-muted);
           border-radius: 6px;
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: all 0.2s ease;
           flex-shrink: 0;
         }
         .exercise-check.checked {
@@ -715,260 +1168,128 @@ function Workout() {
           border-color: var(--success);
           color: white;
         }
-        .exercise-info {
-          flex: 1;
-        }
-        .exercise-name {
-          display: block;
-          font-size: 14px;
-          font-weight: 500;
-        }
-        .exercise-target {
-          font-size: 12px;
+        .exercise-info { flex: 1; }
+        .exercise-name { display: block; font-size: 14px; }
+        .exercise-target { font-size: 12px; color: var(--text-muted); }
+        .delete-exercise {
+          background: none;
+          border: none;
           color: var(--text-muted);
+          padding: 4px;
+          cursor: pointer;
         }
-
+        .delete-exercise:hover { color: var(--error); }
         .sets-tracker {
-          padding: 0 14px 14px;
-          border-top: 1px solid var(--bg-primary);
-          animation: fadeIn 0.2s ease-out;
+          padding: 8px 12px 12px;
+          border-top: 1px solid var(--bg-surface);
         }
         .set-row {
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 10px 0;
-          border-bottom: 1px solid var(--bg-primary);
+          padding: 8px 0;
         }
-        .set-row:last-of-type {
-          border-bottom: none;
-        }
-        .set-num {
-          font-size: 12px;
-          color: var(--text-muted);
-          width: 45px;
-          flex-shrink: 0;
-        }
-        .set-inputs {
-          display: flex;
-          gap: 8px;
+        .set-num { font-size: 12px; color: var(--text-muted); width: 45px; }
+        .set-inputs { display: flex; gap: 8px; flex: 1; }
+        .set-inputs input {
           flex: 1;
-        }
-        .input-group {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          flex: 1;
-        }
-        .input-group input {
-          width: 60px;
           padding: 8px;
-          background: var(--bg-primary);
-          border: 1px solid var(--bg-surface);
+          background: var(--bg-surface);
+          border: none;
           border-radius: 6px;
           color: var(--text-primary);
           font-size: 14px;
           text-align: center;
         }
-        .input-group input:focus {
-          outline: none;
-          border-color: var(--gold);
+        .add-exercise-form {
+          background: var(--bg-primary);
+          padding: 12px;
+          border-radius: 10px;
+          margin-bottom: 12px;
         }
-        .input-group span {
-          font-size: 11px;
-          color: var(--text-muted);
-        }
-        .remove-set {
-          background: rgba(231,76,60,0.2);
+        .add-exercise-form input {
+          width: 100%;
+          padding: 10px;
+          background: var(--bg-surface);
           border: none;
-          width: 28px;
-          height: 28px;
           border-radius: 6px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: var(--error);
-          cursor: pointer;
+          color: var(--text-primary);
+          font-size: 13px;
+          margin-bottom: 8px;
         }
-        .add-set-btn {
+        .exercise-params {
+          display: flex;
+          gap: 8px;
+          margin-bottom: 10px;
+        }
+        .exercise-params input { flex: 1; }
+        .add-exercise-actions { display: flex; gap: 8px; justify-content: flex-end; }
+        .add-exercise-btn {
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 6px;
           width: 100%;
-          padding: 10px;
-          margin-top: 8px;
-          background: var(--bg-primary);
-          border: 1px dashed var(--text-muted);
-          border-radius: 8px;
+          padding: 12px;
+          background: none;
+          border: 2px dashed var(--text-muted);
+          border-radius: 10px;
           color: var(--text-muted);
-          font-size: 12px;
+          font-size: 13px;
           cursor: pointer;
-          transition: all 0.2s ease;
+          margin-bottom: 12px;
         }
-        .add-set-btn:hover {
+        .add-exercise-btn:hover {
           border-color: var(--gold);
           color: var(--gold);
         }
-
+        .day-footer {
+          display: flex;
+          gap: 10px;
+          justify-content: space-between;
+        }
         .complete-day-btn {
-          width: 100%;
           display: flex;
           align-items: center;
-          justify-content: center;
-          gap: 8px;
-          padding: 16px;
+          gap: 6px;
+          background: var(--success);
           border: none;
-          border-radius: 12px;
+          padding: 10px 16px;
+          border-radius: 8px;
+          color: white;
+          font-size: 13px;
           font-weight: 600;
-          font-size: 14px;
           cursor: pointer;
-          transition: all 0.2s ease;
         }
-        .complete-day-btn.ready {
-          background: var(--gold);
-          color: var(--bg-primary);
-        }
-        .complete-day-btn.ready:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(212, 175, 55, 0.3);
-        }
-        .complete-day-btn.disabled {
-          background: var(--bg-surface-light);
-          color: var(--text-muted);
-          cursor: not-allowed;
-        }
-        .day-completed-badge {
+        .delete-day-btn {
           display: flex;
           align-items: center;
-          justify-content: center;
-          gap: 8px;
-          padding: 16px;
-          background: rgba(46,204,113,0.2);
-          border-radius: 12px;
-          color: var(--success);
-          font-weight: 600;
+          gap: 6px;
+          background: rgba(231,76,60,0.15);
+          border: none;
+          padding: 10px 16px;
+          border-radius: 8px;
+          color: var(--error);
+          font-size: 13px;
+          cursor: pointer;
         }
-
-        .weekly-progress {
-          background: var(--bg-surface);
-          padding: 16px;
-          border-radius: 12px;
-          margin-bottom: 16px;
-          text-align: center;
-        }
-        .weekly-progress h3 {
-          font-size: 14px;
-          color: var(--text-secondary);
-          margin-bottom: 12px;
-        }
-        .progress-dots {
+        .loading-state {
           display: flex;
+          flex-direction: column;
+          align-items: center;
           justify-content: center;
-          gap: 8px;
-          margin-bottom: 8px;
+          min-height: 300px;
         }
-        .day-dot {
+        .spinner {
           width: 40px;
           height: 40px;
-          border-radius: 10px;
-          background: var(--bg-surface-light);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 18px;
-          opacity: 0.5;
-          transition: all 0.2s ease;
-          cursor: pointer;
+          border: 3px solid var(--bg-surface-light);
+          border-top-color: var(--gold);
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
         }
-        .day-dot:hover {
-          opacity: 0.8;
-        }
-        .day-dot.today {
-          border: 2px solid var(--gold);
-          opacity: 1;
-        }
-        .day-dot.completed {
-          opacity: 1;
-          background: var(--primary);
-          box-shadow: 0 0 12px rgba(13, 59, 46, 0.5);
-        }
-        .progress-text {
-          font-size: 12px;
-          color: var(--text-muted);
-        }
-
-        .nutrition-toggle {
-          width: 100%;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 14px 16px;
-          background: var(--bg-surface);
-          border: none;
-          border-radius: 12px;
-          color: var(--text-primary);
-          font-size: 14px;
-          cursor: pointer;
-          margin-bottom: 12px;
-        }
-        .nutrition-toggle span {
-          flex: 1;
-          text-align: left;
-        }
-        .nutrition-card {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 8px;
-          margin-bottom: 20px;
-          animation: fadeIn 0.3s ease-out;
-        }
-        .macro {
-          background: var(--bg-surface);
-          padding: 12px;
-          border-radius: 12px;
-          text-align: center;
-        }
-        .macro-value {
-          display: block;
-          font-size: 16px;
-          font-weight: 700;
-          color: var(--gold);
-          font-family: 'Space Grotesk', sans-serif;
-        }
-        .macro-label {
-          font-size: 10px;
-          color: var(--text-muted);
-          text-transform: uppercase;
-        }
-
-        .tips-card {
-          background: var(--bg-surface);
-          padding: 20px;
-          border-radius: 16px;
-        }
-        .tips-card h3 {
-          font-size: 14px;
-          margin-bottom: 12px;
-          color: var(--text-secondary);
-        }
-        .tips-card ul {
-          list-style: none;
-          padding: 0;
-        }
-        .tips-card li {
-          padding: 8px 0;
-          font-size: 13px;
-          color: var(--text-muted);
-          border-bottom: 1px solid var(--bg-surface-light);
-        }
-        .tips-card li:last-child {
-          border-bottom: none;
-        }
-        .tips-card li::before {
-          content: '→ ';
-          color: var(--gold);
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
     </div>
   );

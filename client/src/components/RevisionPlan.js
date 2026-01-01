@@ -1,276 +1,337 @@
 import React, { useState, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
-import { RotateCcw, Check, ChevronRight, Award, ClipboardList } from 'lucide-react';
-import { SURAHS } from './QuranReader';
-import axios from 'axios';
+import { useAuth } from '../context/AuthContext';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { 
+  RotateCcw, Check, ChevronRight, BookOpen, 
+  Calendar, Lock, Award, Target, Star, Clock,
+  ChevronDown, ChevronUp, Play, Trophy
+} from 'lucide-react';
 
-const KNOWLEDGE_LEVELS = [
-  { id: 'none', label: 'Not memorized', color: 'var(--text-muted)' },
-  { id: 'learning', label: 'Currently learning', color: 'var(--warning)' },
-  { id: 'weak', label: 'Memorized but weak', color: 'var(--error)' },
-  { id: 'good', label: 'Memorized & good', color: 'var(--info)' },
-  { id: 'strong', label: 'Memorized & strong', color: 'var(--success)' },
+// Juz sections with page ranges (Madinah Mushaf)
+const JUZ_SECTIONS = [
+  { 
+    id: 'juz1-5', 
+    name: 'Juz 1-5', 
+    subtitle: 'Al-Fatihah to Al-Maidah',
+    pages: { start: 1, end: 106 },
+    surahs: [1, 2, 3, 4, 5],
+    unlocked: true 
+  },
+  { 
+    id: 'juz6-10', 
+    name: 'Juz 6-10', 
+    subtitle: 'Al-Anam to At-Tawbah',
+    pages: { start: 107, end: 208 },
+    surahs: [6, 7, 8, 9],
+    unlocked: false 
+  },
+  { 
+    id: 'juz11-15', 
+    name: 'Juz 11-15', 
+    subtitle: 'Yunus to Al-Isra',
+    pages: { start: 209, end: 293 },
+    surahs: [10, 11, 12, 13, 14, 15, 16, 17],
+    unlocked: false 
+  },
+  { 
+    id: 'juz16-20', 
+    name: 'Juz 16-20', 
+    subtitle: 'Al-Kahf to Al-Ankabut',
+    pages: { start: 294, end: 396 },
+    surahs: [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+    unlocked: false 
+  },
+  { 
+    id: 'juz21-25', 
+    name: 'Juz 21-25', 
+    subtitle: 'Ar-Rum to Al-Jathiyah',
+    pages: { start: 397, end: 499 },
+    surahs: [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45],
+    unlocked: false 
+  },
+  { 
+    id: 'juz26-30', 
+    name: 'Juz 26-30', 
+    subtitle: 'Al-Ahqaf to An-Nas',
+    pages: { start: 500, end: 604 },
+    surahs: [46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114],
+    unlocked: false 
+  },
 ];
 
+// Assessment questions per section (sample - in real app, fetch from API)
+const generateAssessmentQuestions = (sectionId) => {
+  const questions = [
+    { id: 1, prompt: 'Recite from the beginning of this Juz section', type: 'recite' },
+    { id: 2, prompt: 'Continue from a random ayah in the middle', type: 'continue' },
+    { id: 3, prompt: 'Identify which Surah this ayah is from', type: 'identify' },
+    { id: 4, prompt: 'Recite the next 5 ayahs from this point', type: 'recite' },
+    { id: 5, prompt: 'Complete this ayah from memory', type: 'complete' },
+  ];
+  return questions;
+};
+
 function RevisionPlan() {
-  const { addXp } = useApp();
+  const { user } = useAuth();
   
-  const [surveyComplete, setSurveyComplete] = useState(() => {
-    const saved = localStorage.getItem('qawaam_revision_survey');
-    return saved ? JSON.parse(saved).complete : false;
-  });
+  const [loading, setLoading] = useState(true);
+  const [sections, setSections] = useState(JUZ_SECTIONS);
+  const [sectionProgress, setSectionProgress] = useState({});
+  const [assessments, setAssessments] = useState({});
+  const [expandedSection, setExpandedSection] = useState(null);
+  const [activeAssessment, setActiveAssessment] = useState(null);
+  const [assessmentStep, setAssessmentStep] = useState(0);
+  const [assessmentScore, setAssessmentScore] = useState(0);
+  const [dailyGoal, setDailyGoal] = useState(5); // Pages per day
+  const [todayProgress, setTodayProgress] = useState({ reviewed: 0, date: null });
 
-  const [surveyData, setSurveyData] = useState(() => {
-    const saved = localStorage.getItem('qawaam_revision_survey');
-    return saved ? JSON.parse(saved).data : {};
-  });
-
-  const [revisionPlan, setRevisionPlan] = useState(() => {
-    const saved = localStorage.getItem('qawaam_revision_plan');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [todayRevision, setTodayRevision] = useState(() => {
-    const saved = localStorage.getItem('qawaam_today_revision');
-    const today = new Date().toDateString();
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.date === today) return parsed;
+  useEffect(() => {
+    if (user) {
+      loadRevisionData();
     }
-    return { date: today, completed: false, items: [] };
-  });
+  }, [user]);
 
-  const [currentSurahIndex, setCurrentSurahIndex] = useState(0);
-  const [revisionAyahs, setRevisionAyahs] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  // Save to localStorage
-  useEffect(() => {
-    localStorage.setItem('qawaam_revision_survey', JSON.stringify({
-      complete: surveyComplete,
-      data: surveyData
-    }));
-  }, [surveyComplete, surveyData]);
-
-  useEffect(() => {
-    localStorage.setItem('qawaam_revision_plan', JSON.stringify(revisionPlan));
-  }, [revisionPlan]);
-
-  useEffect(() => {
-    localStorage.setItem('qawaam_today_revision', JSON.stringify(todayRevision));
-  }, [todayRevision]);
-
-  // Generate revision plan based on survey
-  const generateRevisionPlan = () => {
-    const plan = [];
-    
-    // Get surahs that need revision (weak, learning, good - but not none or strong)
-    Object.entries(surveyData).forEach(([surahNum, level]) => {
-      if (level === 'weak' || level === 'learning' || level === 'good') {
-        const priority = level === 'weak' ? 3 : level === 'learning' ? 2 : 1;
-        plan.push({
-          surah: parseInt(surahNum),
-          level,
-          priority,
-          lastReviewed: null
-        });
-      }
-    });
-
-    // Sort by priority (weak first)
-    plan.sort((a, b) => b.priority - a.priority);
-    
-    setRevisionPlan(plan);
-    
-    // Set today's revision (first 3 items)
-    const todayItems = plan.slice(0, 3).map(p => p.surah);
-    setTodayRevision({
-      date: new Date().toDateString(),
-      completed: false,
-      items: todayItems,
-      current: 0
-    });
-  };
-
-  const handleSurveyAnswer = (surahNum, level) => {
-    setSurveyData(prev => ({
-      ...prev,
-      [surahNum]: level
-    }));
-  };
-
-  const completeSurvey = () => {
-    setSurveyComplete(true);
-    generateRevisionPlan();
-  };
-
-  const loadRevisionSurah = async (surahNum) => {
+  const loadRevisionData = async () => {
     setLoading(true);
     try {
-      const [arabicRes, translationRes] = await Promise.all([
-        axios.get(`http://localhost:5000/api/surah/${surahNum}`),
-        axios.get(`http://localhost:5000/api/surah/${surahNum}/translation`)
-      ]);
-
-      const ayahs = arabicRes.data.data.ayahs.map((ayah, i) => ({
-        ...ayah,
-        translation: translationRes.data.data.ayahs[i]?.text
-      }));
-
-      setRevisionAyahs(ayahs);
+      const docRef = doc(db, 'users', user.uid, 'quran', 'revision');
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        
+        // Load section unlock status
+        const loadedSections = JUZ_SECTIONS.map(section => ({
+          ...section,
+          unlocked: data.unlockedSections?.includes(section.id) || section.id === 'juz1-5'
+        }));
+        setSections(loadedSections);
+        
+        // Load progress
+        setSectionProgress(data.sectionProgress || {});
+        setAssessments(data.assessments || {});
+        setDailyGoal(data.dailyGoal || 5);
+        
+        // Check today's progress
+        const today = new Date().toDateString();
+        if (data.todayProgress?.date === today) {
+          setTodayProgress(data.todayProgress);
+        } else {
+          setTodayProgress({ reviewed: 0, date: today });
+        }
+      }
     } catch (error) {
-      console.error('Error loading surah:', error);
+      console.error('Error loading revision data:', error);
     }
     setLoading(false);
   };
 
-  const markRevisionComplete = () => {
-    const updatedItems = [...todayRevision.items];
-    const currentIndex = todayRevision.current || 0;
+  const saveRevisionData = async (updates) => {
+    if (!user) return;
+    try {
+      const docRef = doc(db, 'users', user.uid, 'quran', 'revision');
+      await setDoc(docRef, {
+        unlockedSections: sections.filter(s => s.unlocked).map(s => s.id),
+        sectionProgress,
+        assessments,
+        dailyGoal,
+        todayProgress,
+        ...updates,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (error) {
+      console.error('Error saving revision data:', error);
+    }
+  };
+
+  const getProgress = (sectionId) => {
+    const progress = sectionProgress[sectionId] || { pagesReviewed: [], lastReview: null };
+    const section = sections.find(s => s.id === sectionId);
+    const totalPages = section.pages.end - section.pages.start + 1;
+    const reviewedCount = progress.pagesReviewed?.length || 0;
+    return {
+      ...progress,
+      totalPages,
+      reviewedCount,
+      percentage: Math.round((reviewedCount / totalPages) * 100)
+    };
+  };
+
+  const markPageReviewed = async (sectionId, pageNum) => {
+    const currentProgress = sectionProgress[sectionId] || { pagesReviewed: [], lastReview: null };
     
-    if (currentIndex < updatedItems.length - 1) {
-      // Move to next surah
-      setTodayRevision(prev => ({
-        ...prev,
-        current: currentIndex + 1
-      }));
-      loadRevisionSurah(updatedItems[currentIndex + 1]);
+    if (!currentProgress.pagesReviewed.includes(pageNum)) {
+      const updatedProgress = {
+        ...sectionProgress,
+        [sectionId]: {
+          pagesReviewed: [...currentProgress.pagesReviewed, pageNum],
+          lastReview: new Date().toISOString()
+        }
+      };
+      
+      const updatedTodayProgress = {
+        reviewed: todayProgress.reviewed + 1,
+        date: new Date().toDateString()
+      };
+      
+      setSectionProgress(updatedProgress);
+      setTodayProgress(updatedTodayProgress);
+      
+      await saveRevisionData({ 
+        sectionProgress: updatedProgress,
+        todayProgress: updatedTodayProgress
+      });
+    }
+  };
+
+  const startAssessment = (sectionId) => {
+    setActiveAssessment(sectionId);
+    setAssessmentStep(0);
+    setAssessmentScore(0);
+  };
+
+  const answerAssessment = async (correct) => {
+    const newScore = correct ? assessmentScore + 1 : assessmentScore;
+    setAssessmentScore(newScore);
+    
+    const questions = generateAssessmentQuestions(activeAssessment);
+    
+    if (assessmentStep < questions.length - 1) {
+      setAssessmentStep(assessmentStep + 1);
     } else {
-      // All done
-      setTodayRevision(prev => ({
-        ...prev,
-        completed: true
-      }));
-      addXp(75);
+      // Assessment complete
+      const passed = (newScore / questions.length) >= 0.7; // 70% to pass
+      
+      const updatedAssessments = {
+        ...assessments,
+        [activeAssessment]: {
+          completed: true,
+          passed,
+          score: newScore,
+          total: questions.length,
+          date: new Date().toISOString()
+        }
+      };
+      setAssessments(updatedAssessments);
+      
+      // Unlock next section if passed
+      if (passed) {
+        const currentIndex = sections.findIndex(s => s.id === activeAssessment);
+        if (currentIndex < sections.length - 1) {
+          const nextSectionId = sections[currentIndex + 1].id;
+          const updatedSections = sections.map(s => 
+            s.id === nextSectionId ? { ...s, unlocked: true } : s
+          );
+          setSections(updatedSections);
+          
+          await saveRevisionData({ 
+            assessments: updatedAssessments,
+            unlockedSections: updatedSections.filter(s => s.unlocked).map(s => s.id)
+          });
+        }
+      } else {
+        await saveRevisionData({ assessments: updatedAssessments });
+      }
+      
+      setActiveAssessment(null);
     }
   };
 
-  const resetSurvey = () => {
-    setSurveyComplete(false);
-    setSurveyData({});
-    setRevisionPlan([]);
-    setTodayRevision({ date: new Date().toDateString(), completed: false, items: [] });
+  const getNextPages = (sectionId) => {
+    const section = sections.find(s => s.id === sectionId);
+    const progress = sectionProgress[sectionId] || { pagesReviewed: [] };
+    const reviewed = new Set(progress.pagesReviewed || []);
+    
+    const nextPages = [];
+    for (let page = section.pages.start; page <= section.pages.end && nextPages.length < 5; page++) {
+      if (!reviewed.has(page)) {
+        nextPages.push(page);
+      }
+    }
+    return nextPages;
   };
 
-  // Start revision if items exist
-  useEffect(() => {
-    if (todayRevision.items.length > 0 && !todayRevision.completed && revisionAyahs.length === 0) {
-      loadRevisionSurah(todayRevision.items[todayRevision.current || 0]);
-    }
-  }, [todayRevision]);
+  if (loading) {
+    return (
+      <div className="loading-state">
+        <div className="spinner" />
+        <p>Loading revision plan...</p>
+      </div>
+    );
+  }
 
-  // Survey View
-  if (!surveyComplete) {
-    const surveySurahs = SURAHS.slice().reverse().slice(0, 30); // Last 30 surahs (Juz Amma + some)
+  // Assessment View
+  if (activeAssessment) {
+    const questions = generateAssessmentQuestions(activeAssessment);
+    const currentQuestion = questions[assessmentStep];
+    const section = sections.find(s => s.id === activeAssessment);
     
     return (
-      <div className="revision-survey">
-        <div className="survey-header">
-          <ClipboardList size={32} className="icon" />
-          <h2>Knowledge Assessment</h2>
-          <p>Tell us what you've memorized so we can create your revision plan</p>
+      <div className="assessment-view">
+        <div className="assessment-header">
+          <Trophy size={32} className="trophy" />
+          <h2>Assessment: {section.name}</h2>
+          <p>Pass with 70% to unlock the next section</p>
         </div>
-
-        <div className="survey-progress">
-          <span>{Object.keys(surveyData).length} / {surveySurahs.length} surahs assessed</span>
+        
+        <div className="assessment-progress">
+          <span>Question {assessmentStep + 1} / {questions.length}</span>
           <div className="progress-bar">
-            <div 
-              className="progress-fill" 
-              style={{ width: `${(Object.keys(surveyData).length / surveySurahs.length) * 100}%` }} 
-            />
+            <div className="progress-fill" style={{ width: `${((assessmentStep + 1) / questions.length) * 100}%` }} />
+          </div>
+          <span className="score">{assessmentScore} ✓</span>
+        </div>
+        
+        <div className="question-card">
+          <h3>{currentQuestion.prompt}</h3>
+          <p className="question-type">{currentQuestion.type === 'recite' ? '🎤 Recitation' : currentQuestion.type === 'continue' ? '➡️ Continuation' : '❓ Identification'}</p>
+          
+          <div className="instruction-box">
+            <p>Open your Mushaf to {section.name} and perform this task. Then rate your performance below.</p>
           </div>
         </div>
-
-        <div className="survey-list">
-          {surveySurahs.map((surah) => (
-            <div key={surah.number} className="survey-item">
-              <div className="surah-info">
-                <span className="surah-num">{surah.number}</span>
-                <div>
-                  <span className="surah-name">{surah.name}</span>
-                  <span className="arabic-name">{surah.arabicName}</span>
-                </div>
-              </div>
-              <div className="level-selector">
-                {KNOWLEDGE_LEVELS.map((level) => (
-                  <button
-                    key={level.id}
-                    className={`level-btn ${surveyData[surah.number] === level.id ? 'active' : ''}`}
-                    style={{ 
-                      '--level-color': level.color,
-                      borderColor: surveyData[surah.number] === level.id ? level.color : 'transparent'
-                    }}
-                    onClick={() => handleSurveyAnswer(surah.number, level.id)}
-                    title={level.label}
-                  >
-                    {level.id === 'none' && '✗'}
-                    {level.id === 'learning' && '📚'}
-                    {level.id === 'weak' && '⚠️'}
-                    {level.id === 'good' && '👍'}
-                    {level.id === 'strong' && '💪'}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
+        
+        <div className="answer-buttons">
+          <button className="answer-btn wrong" onClick={() => answerAssessment(false)}>
+            <span>❌</span>
+            Made Mistakes
+          </button>
+          <button className="answer-btn correct" onClick={() => answerAssessment(true)}>
+            <span>✅</span>
+            Correct
+          </button>
         </div>
-
-        <div className="legend">
-          {KNOWLEDGE_LEVELS.map((level) => (
-            <span key={level.id} style={{ color: level.color }}>
-              {level.id === 'none' && '✗'}
-              {level.id === 'learning' && '📚'}
-              {level.id === 'weak' && '⚠️'}
-              {level.id === 'good' && '👍'}
-              {level.id === 'strong' && '💪'}
-              {' '}{level.label}
-            </span>
-          ))}
-        </div>
-
-        <button 
-          className="btn btn-primary complete-survey-btn"
-          onClick={completeSurvey}
-          disabled={Object.keys(surveyData).length < 5}
-        >
-          Generate My Revision Plan
+        
+        <button className="cancel-btn" onClick={() => setActiveAssessment(null)}>
+          Cancel Assessment
         </button>
-
+        
         <style>{`
-          .revision-survey {
-            animation: fadeIn 0.3s ease-out;
-          }
-          .survey-header {
+          .assessment-view { animation: fadeIn 0.3s ease-out; }
+          .assessment-header {
             text-align: center;
-            padding: 30px 20px;
-            background: var(--bg-surface);
-            border-radius: 16px;
+            padding: 30px;
+            background: linear-gradient(135deg, var(--primary) 0%, #1a4a3a 100%);
+            border-radius: 20px;
             margin-bottom: 20px;
           }
-          .survey-header .icon {
-            color: var(--gold);
-            margin-bottom: 12px;
-          }
-          .survey-header h2 {
-            font-size: 20px;
-            margin-bottom: 8px;
-          }
-          .survey-header p {
-            color: var(--text-muted);
+          .trophy { color: var(--gold); margin-bottom: 12px; }
+          .assessment-header h2 { font-size: 22px; margin-bottom: 8px; }
+          .assessment-header p { color: var(--text-secondary); font-size: 14px; }
+          .assessment-progress {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
             font-size: 13px;
-          }
-          .survey-progress {
-            margin-bottom: 16px;
-          }
-          .survey-progress span {
-            font-size: 12px;
             color: var(--text-muted);
           }
           .progress-bar {
-            height: 4px;
+            flex: 1;
+            height: 6px;
             background: var(--bg-surface);
-            border-radius: 2px;
-            margin-top: 8px;
+            border-radius: 3px;
             overflow: hidden;
           }
           .progress-fill {
@@ -278,336 +339,505 @@ function RevisionPlan() {
             background: var(--gold);
             transition: width 0.3s ease;
           }
-          .survey-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
+          .score { color: var(--success); font-weight: 600; }
+          .question-card {
+            background: var(--bg-surface);
+            padding: 24px;
+            border-radius: 16px;
+            text-align: center;
             margin-bottom: 20px;
           }
-          .survey-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: var(--bg-surface);
-            padding: 12px 16px;
-            border-radius: 10px;
-          }
-          .surah-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-          }
-          .surah-num {
-            width: 28px;
-            height: 28px;
-            background: var(--primary);
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 11px;
-            font-weight: 600;
-          }
-          .surah-name {
-            display: block;
+          .question-card h3 { font-size: 18px; margin-bottom: 12px; }
+          .question-type {
+            display: inline-block;
+            padding: 6px 16px;
+            background: var(--bg-surface-light);
+            border-radius: 20px;
             font-size: 13px;
-            font-weight: 500;
+            margin-bottom: 20px;
           }
-          .arabic-name {
-            font-family: 'Amiri', serif;
-            font-size: 12px;
+          .instruction-box {
+            padding: 16px;
+            background: rgba(212,175,55,0.1);
+            border-radius: 12px;
+            font-size: 14px;
             color: var(--gold);
           }
-          .level-selector {
-            display: flex;
-            gap: 4px;
+          .answer-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
           }
-          .level-btn {
-            width: 32px;
-            height: 32px;
-            background: var(--bg-surface-light);
-            border: 2px solid transparent;
-            border-radius: 6px;
+          .answer-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 20px;
+            border: none;
+            border-radius: 14px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+          }
+          .answer-btn span { font-size: 24px; }
+          .answer-btn.wrong { background: rgba(231,76,60,0.2); color: var(--error); }
+          .answer-btn.correct { background: var(--gold); color: var(--bg-primary); }
+          .cancel-btn {
+            width: 100%;
+            padding: 14px;
+            background: var(--bg-surface);
+            border: none;
+            border-radius: 12px;
+            color: var(--text-muted);
             font-size: 14px;
             cursor: pointer;
-            transition: all 0.2s ease;
-          }
-          .level-btn:hover {
-            background: var(--bg-primary);
-          }
-          .level-btn.active {
-            background: rgba(212,175,55,0.2);
-          }
-          .legend {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            justify-content: center;
-            margin-bottom: 20px;
-            font-size: 11px;
-          }
-          .complete-survey-btn {
-            width: 100%;
-          }
-          .complete-survey-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
           }
         `}</style>
       </div>
     );
   }
 
-  // Revision View
-  const currentSurahNum = todayRevision.items[todayRevision.current || 0];
-  const currentSurah = SURAHS.find(s => s.number === currentSurahNum);
-
+  // Main Dashboard
   return (
-    <div className="revision-plan">
-      {/* Stats */}
-      <div className="stats-row">
-        <div className="stat-card">
-          <RotateCcw size={20} />
-          <div>
-            <span className="stat-value">{revisionPlan.length}</span>
-            <span className="stat-label">Surahs to Revise</span>
-          </div>
+    <div className="revision-dashboard">
+      {/* Daily Progress */}
+      <div className="daily-card">
+        <div className="daily-header">
+          <Calendar size={20} />
+          <h3>Today's Revision</h3>
         </div>
-        <div className="stat-card">
-          <span className="stat-value">{todayRevision.items.length}</span>
-          <span className="stat-label">Today's Sessions</span>
+        <div className="daily-progress">
+          <div className="daily-ring">
+            <svg viewBox="0 0 100 100">
+              <circle className="ring-bg" cx="50" cy="50" r="40" />
+              <circle 
+                className="ring-fill" 
+                cx="50" cy="50" r="40"
+                strokeDasharray={`${(todayProgress.reviewed / dailyGoal) * 251} 251`}
+              />
+            </svg>
+            <span className="ring-text">{todayProgress.reviewed}/{dailyGoal}</span>
+          </div>
+          <div className="daily-info">
+            <span className="pages-label">Pages Reviewed</span>
+            <span className="goal-text">Daily Goal: {dailyGoal} pages</span>
+            {todayProgress.reviewed >= dailyGoal && (
+              <span className="goal-complete">✨ Goal Complete!</span>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Today's Revision */}
-      <div className={`today-revision ${todayRevision.completed ? 'completed' : ''}`}>
-        <div className="revision-header">
-          <h3>{todayRevision.completed ? '✅ Revision Complete!' : '📖 Today\'s Revision'}</h3>
-          <button className="reset-btn" onClick={resetSurvey}>Reset</button>
-        </div>
-
-        {todayRevision.completed ? (
-          <div className="completed-message">
-            <Award size={32} />
-            <p>Excellent! You've completed today's revision.</p>
-            <span>+75 XP earned</span>
-          </div>
-        ) : todayRevision.items.length === 0 ? (
-          <div className="no-revision">
-            <p>No surahs to revise based on your assessment.</p>
-            <button className="btn btn-secondary" onClick={resetSurvey}>
-              Retake Assessment
-            </button>
-          </div>
-        ) : (
-          <>
-            {/* Progress dots */}
-            <div className="revision-progress">
-              {todayRevision.items.map((item, i) => {
-                const surah = SURAHS.find(s => s.number === item);
-                const isCurrent = i === (todayRevision.current || 0);
-                const isDone = i < (todayRevision.current || 0);
-                return (
-                  <div key={item} className={`progress-dot ${isCurrent ? 'current' : ''} ${isDone ? 'done' : ''}`}>
-                    {isDone ? <Check size={12} /> : i + 1}
-                    <span>{surah?.name}</span>
+      {/* Juz Sections */}
+      <div className="sections-list">
+        <h3>📖 Revision Progress</h3>
+        <p className="sections-subtitle">Starting from Al-Fatihah • Pass assessment to unlock next section</p>
+        
+        {sections.map((section, index) => {
+          const progress = getProgress(section.id);
+          const assessment = assessments[section.id];
+          const isExpanded = expandedSection === section.id;
+          const nextPages = getNextPages(section.id);
+          const isLastUnlocked = section.unlocked && (index === sections.length - 1 || !sections[index + 1].unlocked);
+          
+          return (
+            <div 
+              key={section.id} 
+              className={`section-card ${!section.unlocked ? 'locked' : ''} ${progress.percentage === 100 ? 'complete' : ''}`}
+            >
+              <div className="section-header" onClick={() => section.unlocked && setExpandedSection(isExpanded ? null : section.id)}>
+                <div className="section-info">
+                  {!section.unlocked ? (
+                    <Lock size={20} className="lock-icon" />
+                  ) : progress.percentage === 100 ? (
+                    <Check size={20} className="check-icon" />
+                  ) : (
+                    <BookOpen size={20} className="book-icon" />
+                  )}
+                  <div>
+                    <h4>{section.name}</h4>
+                    <span className="section-subtitle">{section.subtitle}</span>
                   </div>
-                );
-              })}
-            </div>
-
-            {currentSurah && (
-              <div className="current-surah">
-                <h4>{currentSurah.name} <span className="arabic">{currentSurah.arabicName}</span></h4>
-                <p>{currentSurah.ayahs} ayahs</p>
+                </div>
+                <div className="section-meta">
+                  {section.unlocked ? (
+                    <>
+                      <span className="progress-text">{progress.percentage}%</span>
+                      {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                    </>
+                  ) : (
+                    <span className="locked-text">Locked</span>
+                  )}
+                </div>
               </div>
-            )}
-
-            {loading ? (
-              <div className="loading">Loading surah...</div>
-            ) : (
-              <div className="ayahs-container">
-                {revisionAyahs.map((ayah) => (
-                  <div key={ayah.number} className="ayah-item">
-                    <span className="ayah-num">{ayah.numberInSurah}</span>
-                    <div>
-                      <p className="arabic">{ayah.text}</p>
-                      <p className="translation">{ayah.translation}</p>
+              
+              {/* Progress Bar */}
+              {section.unlocked && (
+                <div className="section-progress-bar">
+                  <div className="bar-fill" style={{ width: `${progress.percentage}%` }} />
+                </div>
+              )}
+              
+              {/* Expanded Content */}
+              {isExpanded && section.unlocked && (
+                <div className="section-content">
+                  <div className="progress-stats">
+                    <div className="stat">
+                      <span className="stat-value">{progress.reviewedCount}</span>
+                      <span className="stat-label">Reviewed</span>
+                    </div>
+                    <div className="stat">
+                      <span className="stat-value">{progress.totalPages - progress.reviewedCount}</span>
+                      <span className="stat-label">Remaining</span>
+                    </div>
+                    <div className="stat">
+                      <span className="stat-value">{progress.totalPages}</span>
+                      <span className="stat-label">Total Pages</span>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-
-            <button className="btn btn-primary" onClick={markRevisionComplete}>
-              <Check size={18} />
-              {todayRevision.current < todayRevision.items.length - 1 
-                ? 'Next Surah' 
-                : 'Complete Revision (+75 XP)'}
-            </button>
-          </>
-        )}
+                  
+                  {/* Next Pages to Review */}
+                  {nextPages.length > 0 && (
+                    <div className="next-pages">
+                      <h5>Next pages to review:</h5>
+                      <div className="page-buttons">
+                        {nextPages.map(page => (
+                          <button 
+                            key={page}
+                            className="page-btn"
+                            onClick={() => markPageReviewed(section.id, page)}
+                          >
+                            Page {page}
+                            <Check size={14} />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Assessment Button */}
+                  {progress.percentage >= 80 && isLastUnlocked && index < sections.length - 1 && (
+                    <div className="assessment-section">
+                      {assessment?.passed ? (
+                        <div className="assessment-passed">
+                          <Award size={20} />
+                          <span>Assessment Passed! ({assessment.score}/{assessment.total})</span>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="assessment-hint">Complete 80%+ to take assessment</p>
+                          <button className="assessment-btn" onClick={() => startAssessment(section.id)}>
+                            <Play size={16} />
+                            Take Assessment to Unlock {sections[index + 1].name}
+                          </button>
+                          {assessment && !assessment.passed && (
+                            <p className="retry-hint">Previous attempt: {assessment.score}/{assessment.total} - Try again!</p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                  
+                  {progress.percentage === 100 && !isLastUnlocked && (
+                    <div className="section-complete">
+                      <Star size={20} />
+                      <span>Section Complete!</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <style>{`
-        .revision-plan {
-          animation: fadeIn 0.3s ease-out;
-        }
-        .stats-row {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
+        .revision-dashboard { animation: fadeIn 0.3s ease-out; }
+        
+        .daily-card {
+          background: linear-gradient(135deg, var(--primary) 0%, #1a4a3a 100%);
+          padding: 20px;
+          border-radius: 20px;
           margin-bottom: 20px;
         }
-        .stat-card {
+        .daily-header {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 16px;
+        }
+        .daily-header svg { color: var(--gold); }
+        .daily-header h3 { font-size: 16px; }
+        .daily-progress {
+          display: flex;
+          align-items: center;
+          gap: 20px;
+        }
+        .daily-ring {
+          position: relative;
+          width: 80px;
+          height: 80px;
+        }
+        .daily-ring svg {
+          transform: rotate(-90deg);
+          width: 100%;
+          height: 100%;
+        }
+        .ring-bg {
+          fill: none;
+          stroke: rgba(255,255,255,0.1);
+          stroke-width: 8;
+        }
+        .ring-fill {
+          fill: none;
+          stroke: var(--gold);
+          stroke-width: 8;
+          stroke-linecap: round;
+          transition: stroke-dasharray 0.3s ease;
+        }
+        .ring-text {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          font-size: 16px;
+          font-weight: 700;
+          color: var(--gold);
+        }
+        .daily-info { flex: 1; }
+        .pages-label {
+          display: block;
+          font-size: 14px;
+          margin-bottom: 4px;
+        }
+        .goal-text {
+          display: block;
+          font-size: 12px;
+          color: var(--text-muted);
+        }
+        .goal-complete {
+          display: block;
+          font-size: 13px;
+          color: var(--gold);
+          margin-top: 8px;
+        }
+        
+        .sections-list {
+          background: var(--bg-surface);
+          padding: 20px;
+          border-radius: 20px;
+        }
+        .sections-list h3 {
+          font-size: 18px;
+          margin-bottom: 4px;
+        }
+        .sections-subtitle {
+          font-size: 12px;
+          color: var(--text-muted);
+          margin-bottom: 16px;
+        }
+        
+        .section-card {
+          background: var(--bg-surface-light);
+          border-radius: 16px;
+          margin-bottom: 12px;
+          overflow: hidden;
+          border-left: 4px solid var(--text-muted);
+          transition: all 0.2s ease;
+        }
+        .section-card.locked {
+          opacity: 0.6;
+          border-left-color: var(--text-muted);
+        }
+        .section-card.complete {
+          border-left-color: var(--success);
+        }
+        .section-card:not(.locked) {
+          border-left-color: var(--gold);
+        }
+        
+        .section-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 16px;
+          cursor: pointer;
+        }
+        .section-card.locked .section-header {
+          cursor: not-allowed;
+        }
+        .section-info {
           display: flex;
           align-items: center;
           gap: 12px;
-          background: var(--bg-surface);
-          padding: 16px;
-          border-radius: 12px;
         }
-        .stat-card svg {
+        .lock-icon { color: var(--text-muted); }
+        .check-icon { color: var(--success); }
+        .book-icon { color: var(--gold); }
+        .section-info h4 { font-size: 15px; margin-bottom: 2px; }
+        .section-subtitle { font-size: 12px; color: var(--text-muted); }
+        .section-meta {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .progress-text {
+          font-size: 14px;
+          font-weight: 600;
           color: var(--gold);
+        }
+        .locked-text {
+          font-size: 12px;
+          color: var(--text-muted);
+        }
+        
+        .section-progress-bar {
+          height: 4px;
+          background: var(--bg-primary);
+          margin: 0 16px;
+        }
+        .bar-fill {
+          height: 100%;
+          background: var(--gold);
+          transition: width 0.3s ease;
+        }
+        
+        .section-content {
+          padding: 16px;
+          border-top: 1px solid var(--bg-primary);
+        }
+        
+        .progress-stats {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 10px;
+          margin-bottom: 16px;
+        }
+        .stat {
+          text-align: center;
+          padding: 12px;
+          background: var(--bg-primary);
+          border-radius: 10px;
         }
         .stat-value {
           display: block;
-          font-size: 24px;
+          font-size: 20px;
           font-weight: 700;
+          color: var(--gold);
         }
         .stat-label {
           font-size: 11px;
           color: var(--text-muted);
         }
-        .today-revision {
-          background: var(--bg-surface);
-          border-radius: 16px;
-          padding: 20px;
-        }
-        .today-revision.completed {
-          border: 2px solid var(--success);
-        }
-        .revision-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
+        
+        .next-pages {
           margin-bottom: 16px;
         }
-        .revision-header h3 {
-          font-size: 16px;
+        .next-pages h5 {
+          font-size: 13px;
+          color: var(--text-secondary);
+          margin-bottom: 10px;
         }
-        .reset-btn {
-          background: none;
+        .page-buttons {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .page-btn {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 10px 14px;
+          background: var(--bg-primary);
           border: none;
-          color: var(--text-muted);
-          font-size: 12px;
+          border-radius: 10px;
+          color: var(--text-primary);
+          font-size: 13px;
           cursor: pointer;
+          transition: all 0.2s ease;
         }
-        .completed-message {
+        .page-btn:hover {
+          background: var(--gold);
+          color: var(--bg-primary);
+        }
+        .page-btn svg { opacity: 0; }
+        .page-btn:hover svg { opacity: 1; }
+        
+        .assessment-section {
+          padding: 16px;
+          background: rgba(212,175,55,0.1);
+          border-radius: 12px;
           text-align: center;
-          padding: 30px;
         }
-        .completed-message svg {
-          color: var(--gold);
+        .assessment-hint {
+          font-size: 12px;
+          color: var(--text-muted);
           margin-bottom: 12px;
         }
-        .completed-message span {
-          color: var(--gold);
-          font-size: 12px;
-        }
-        .no-revision {
-          text-align: center;
-          padding: 30px;
-          color: var(--text-muted);
-        }
-        .revision-progress {
+        .assessment-btn {
           display: flex;
+          align-items: center;
           justify-content: center;
           gap: 8px;
-          margin-bottom: 20px;
+          width: 100%;
+          padding: 14px;
+          background: var(--gold);
+          border: none;
+          border-radius: 12px;
+          color: var(--bg-primary);
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
         }
-        .progress-dot {
+        .retry-hint {
+          font-size: 12px;
+          color: var(--error);
+          margin-top: 10px;
+        }
+        .assessment-passed {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          color: var(--success);
+          font-weight: 600;
+        }
+        
+        .section-complete {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 12px;
+          background: rgba(46,204,113,0.1);
+          border-radius: 10px;
+          color: var(--success);
+          font-size: 14px;
+        }
+        
+        .loading-state {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 4px;
-          padding: 8px 12px;
-          background: var(--bg-surface-light);
-          border-radius: 8px;
-          font-size: 12px;
-          color: var(--text-muted);
-        }
-        .progress-dot.current {
-          background: var(--primary);
-          color: var(--gold);
-        }
-        .progress-dot.done {
-          background: rgba(46,204,113,0.2);
-          color: var(--success);
-        }
-        .progress-dot span {
-          font-size: 10px;
-        }
-        .current-surah {
-          text-align: center;
-          padding: 16px;
-          background: var(--bg-surface-light);
-          border-radius: 12px;
-          margin-bottom: 16px;
-        }
-        .current-surah h4 {
-          font-size: 18px;
-          margin-bottom: 4px;
-        }
-        .current-surah .arabic {
-          color: var(--gold);
-          font-family: 'Amiri', serif;
-        }
-        .current-surah p {
-          font-size: 12px;
-          color: var(--text-muted);
-        }
-        .ayahs-container {
-          max-height: 350px;
-          overflow-y: auto;
-          margin-bottom: 16px;
-        }
-        .ayah-item {
-          display: flex;
-          gap: 12px;
-          padding: 12px 0;
-          border-bottom: 1px solid var(--bg-surface-light);
-        }
-        .ayah-num {
-          width: 24px;
-          height: 24px;
-          background: var(--primary);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
           justify-content: center;
-          font-size: 10px;
-          flex-shrink: 0;
+          padding: 60px;
         }
-        .ayah-item .arabic {
-          font-size: 20px;
-          line-height: 2;
-          margin-bottom: 8px;
+        .spinner {
+          width: 40px;
+          height: 40px;
+          border: 3px solid var(--bg-surface-light);
+          border-top-color: var(--gold);
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin-bottom: 16px;
         }
-        .ayah-item .translation {
-          font-size: 12px;
-          color: var(--text-secondary);
-          line-height: 1.5;
-        }
-        .loading {
-          text-align: center;
-          padding: 40px;
-          color: var(--text-muted);
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
       `}</style>
     </div>
   );
 }
 
 export default RevisionPlan;
-

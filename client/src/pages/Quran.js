@@ -1,24 +1,53 @@
-import React, { useState, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
-import { BookOpen, Target, RotateCcw, HelpCircle, Settings, ChevronRight, Check, X, Play, Award } from 'lucide-react';
-import axios from 'axios';
+import React, { useState } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { BookOpen, Target, RotateCcw, HelpCircle, Lock } from 'lucide-react';
 import QuranReader from '../components/QuranReader';
 import TajweedKitab from '../components/TajweedKitab';
 import MemorizationPlan from '../components/MemorizationPlan';
 import RevisionPlan from '../components/RevisionPlan';
 import QuranQuiz from '../components/QuranQuiz';
+import FeatureGate, { LockBadge } from '../components/FeatureGate';
 
 const TABS = [
-  { id: 'read', label: 'Read', icon: BookOpen },
-  { id: 'memorize', label: 'Memorize', icon: Target },
-  { id: 'revise', label: 'Revise', icon: RotateCcw },
-  { id: 'quiz', label: 'Quiz', icon: HelpCircle },
-  { id: 'tajweed', label: 'Tajweed', icon: BookOpen },
+  { id: 'read', label: 'Read', icon: BookOpen, feature: null }, // Free for all (limited)
+  { id: 'memorize', label: 'Memorize', icon: Target, feature: 'memorization' },
+  { id: 'revise', label: 'Revise', icon: RotateCcw, feature: 'revision' },
+  { id: 'quiz', label: 'Quiz', icon: HelpCircle, feature: 'musabaqah' },
+  { id: 'tajweed', label: 'Tajweed', icon: BookOpen, feature: 'tajweed' },
 ];
 
 function Quran() {
   const [activeTab, setActiveTab] = useState('read');
-  const { addXp } = useApp();
+  const { hasAccess, getTier } = useAuth();
+  const tier = getTier();
+
+  const renderTabContent = () => {
+    const currentTab = TABS.find(t => t.id === activeTab);
+    
+    // If tab requires a feature and user doesn't have access
+    if (currentTab?.feature && !hasAccess(currentTab.feature)) {
+      return (
+        <FeatureGate feature={currentTab.feature}>
+          <div style={{ minHeight: 300 }} />
+        </FeatureGate>
+      );
+    }
+
+    switch (activeTab) {
+      case 'read':
+        return <QuranReader limitedMode={tier === 'free'} />;
+      case 'memorize':
+        return <MemorizationPlan />;
+      case 'revise':
+        return <RevisionPlan />;
+      case 'quiz':
+        return <QuranQuiz />;
+      case 'tajweed':
+        return <TajweedKitab />;
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="quran-page">
@@ -29,25 +58,34 @@ function Quran() {
 
       {/* Tabs */}
       <div className="tabs-container">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            className={`tab ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            <tab.icon size={16} />
-            <span>{tab.label}</span>
-          </button>
-        ))}
+        {TABS.map((tab) => {
+          const isLocked = tab.feature && !hasAccess(tab.feature);
+          
+          return (
+            <button
+              key={tab.id}
+              className={`tab ${activeTab === tab.id ? 'active' : ''} ${isLocked ? 'locked' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <tab.icon size={16} />
+              <span>{tab.label}</span>
+              {isLocked && <Lock size={12} className="lock-icon" />}
+            </button>
+          );
+        })}
       </div>
+
+      {/* Free user notice */}
+      {tier === 'free' && activeTab === 'read' && (
+        <div className="free-notice">
+          <Lock size={14} />
+          <span>Free users can read 5 surahs. <a href="/pricing">Upgrade</a> for all 114.</span>
+        </div>
+      )}
 
       {/* Tab Content */}
       <div className="tab-content">
-        {activeTab === 'read' && <QuranReader />}
-        {activeTab === 'memorize' && <MemorizationPlan />}
-        {activeTab === 'revise' && <RevisionPlan />}
-        {activeTab === 'quiz' && <QuranQuiz />}
-        {activeTab === 'tajweed' && <TajweedKitab />}
+        {renderTabContent()}
       </div>
 
       <style>{`
@@ -69,7 +107,7 @@ function Quran() {
         .tabs-container {
           display: flex;
           gap: 6px;
-          margin-bottom: 20px;
+          margin-bottom: 16px;
           overflow-x: auto;
           padding-bottom: 4px;
         }
@@ -87,6 +125,7 @@ function Quran() {
           cursor: pointer;
           white-space: nowrap;
           transition: all 0.2s ease;
+          position: relative;
         }
         .tab:hover {
           background: var(--bg-surface-light);
@@ -95,8 +134,34 @@ function Quran() {
           background: var(--primary);
           color: var(--gold);
         }
+        .tab.locked {
+          opacity: 0.7;
+        }
+        .tab .lock-icon {
+          color: var(--gold);
+        }
+        .free-notice {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(212,175,55,0.1);
+          border: 1px solid rgba(212,175,55,0.3);
+          padding: 10px 14px;
+          border-radius: 10px;
+          margin-bottom: 16px;
+          font-size: 12px;
+          color: var(--gold);
+        }
+        .free-notice a {
+          color: var(--gold);
+          font-weight: 600;
+        }
         .tab-content {
           animation: fadeIn 0.3s ease-out;
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
       `}</style>
     </div>

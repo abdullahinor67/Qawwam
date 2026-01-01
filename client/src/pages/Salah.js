@@ -1,368 +1,345 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth, TIERS } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
-import { format, subDays, addDays, isToday, isTomorrow, isYesterday } from 'date-fns';
-import { Check, X, Clock, MapPin, ChevronLeft, ChevronRight, Calendar, Edit2, Trash2 } from 'lucide-react';
-import axios from 'axios';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { 
+  Sun, Sunrise, Sunset, Moon, Cloud,
+  Check, X, Clock, Edit2, ChevronLeft, ChevronRight,
+  Lock
+} from 'lucide-react';
+import FeatureGate from '../components/FeatureGate';
 
-const PRAYER_NAMES = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'];
-const PRAYER_LABELS = {
-  fajr: 'Fajr',
-  dhuhr: 'Dhuhr',
-  asr: 'Asr',
-  maghrib: 'Maghrib',
-  isha: 'Isha'
-};
 const PRAYER_ICONS = {
-  fajr: '🌅',
-  dhuhr: '☀️',
-  asr: '🌤️',
-  maghrib: '🌆',
-  isha: '🌙'
+  fajr: Sunrise,
+  dhuhr: Sun,
+  asr: Cloud,
+  maghrib: Sunset,
+  isha: Moon
 };
+
+const PRAYER_NAMES = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+const PRAYER_KEYS = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'];
+
+const STATUS_OPTIONS = [
+  { value: 'on_time', label: 'On Time', color: 'var(--success)', icon: Check },
+  { value: 'late', label: 'Late', color: 'var(--warning)', icon: Clock },
+  { value: 'missed', label: 'Missed', color: 'var(--error)', icon: X },
+  { value: 'pending', label: 'Pending', color: 'var(--text-muted)', icon: Clock }
+];
 
 function Salah() {
-  const { location, addXp } = useApp();
+  const { user, hasAccess, getTier } = useAuth();
+  const { addXp } = useApp();
+  const tier = getTier();
+
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [prayerData, setPrayerData] = useState({});
   const [prayerTimes, setPrayerTimes] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [showHistory, setShowHistory] = useState(false);
   const [editingPrayer, setEditingPrayer] = useState(null);
-  
-  // Load all prayer data from localStorage
-  const [allPrayerData, setAllPrayerData] = useState(() => {
-    const saved = localStorage.getItem('qawaam_all_prayers');
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [loading, setLoading] = useState(true);
+  const [weekHistory, setWeekHistory] = useState([]);
 
-  // Save to localStorage whenever data changes
+  const today = new Date();
+  const isToday = selectedDate.toDateString() === today.toDateString();
+  const isYesterday = selectedDate.toDateString() === new Date(today.getTime() - 86400000).toDateString();
+  const isTomorrow = selectedDate.toDateString() === new Date(today.getTime() + 86400000).toDateString();
+  const isPast = selectedDate < today && !isToday;
+  const isFuture = selectedDate > today;
+
+  // Get date string for Firestore
+  const getDateStr = (date) => date.toISOString().split('T')[0];
+
+  // Load prayer data
   useEffect(() => {
-    localStorage.setItem('qawaam_all_prayers', JSON.stringify(allPrayerData));
-  }, [allPrayerData]);
+    if (user) {
+      loadPrayerData();
+      loadWeekHistory();
+      fetchPrayerTimes();
+    }
+  }, [user, selectedDate]);
 
-  // Get prayers for a specific date
-  const getPrayersForDate = (date) => {
-    const dateKey = format(date, 'yyyy-MM-dd');
-    return allPrayerData[dateKey] || {};
+  const loadPrayerData = async () => {
+    setLoading(true);
+    try {
+      const dateStr = getDateStr(selectedDate);
+      const docRef = doc(db, 'users', user.uid, 'prayers', dateStr);
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        setPrayerData(docSnap.data());
+      } else {
+        setPrayerData({
+          fajr: 'pending',
+          dhuhr: 'pending',
+          asr: 'pending',
+          maghrib: 'pending',
+          isha: 'pending'
+        });
+      }
+    } catch (error) {
+      console.error('Error loading prayer data:', error);
+    }
+    setLoading(false);
   };
 
-  // Current selected date's prayers
-  const currentPrayers = getPrayersForDate(selectedDate);
-
-  // Fetch prayer times for selected date
-  useEffect(() => {
-    if (!location) return;
-    setLoading(true);
-
-    axios.get(`http://localhost:5000/api/prayer-times?latitude=${location.latitude}&longitude=${location.longitude}&date=${format(selectedDate, 'yyyy-MM-dd')}`)
-      .then(res => {
-        setPrayerTimes(res.data);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error(err);
-        setLoading(false);
-      });
-  }, [location, selectedDate]);
-
-  const markPrayer = (prayer, status) => {
-    const dateKey = format(selectedDate, 'yyyy-MM-dd');
+  const loadWeekHistory = async () => {
+    if (!hasAccess('salah_history')) return;
     
-    setAllPrayerData(prev => ({
-      ...prev,
-      [dateKey]: {
-        ...prev[dateKey],
-        [prayer]: status
+    try {
+      const history = [];
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date(today.getTime() - i * 86400000);
+        const dateStr = getDateStr(date);
+        const docRef = doc(db, 'users', user.uid, 'prayers', dateStr);
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const completed = PRAYER_KEYS.filter(p => 
+            data[p] === 'on_time' || data[p] === 'late'
+          ).length;
+          history.push({ date, completed, data });
+        } else {
+          history.push({ date, completed: 0, data: null });
+        }
       }
-    }));
-
-    setEditingPrayer(null);
-
-    // Only give XP for today's prayers
-    if (isToday(selectedDate)) {
-      if (status === 'on_time') addXp(50);
-      else if (status === 'late') addXp(20);
+      setWeekHistory(history);
+    } catch (error) {
+      console.error('Error loading week history:', error);
     }
   };
 
-  const clearPrayer = (prayer) => {
-    const dateKey = format(selectedDate, 'yyyy-MM-dd');
+  const fetchPrayerTimes = async () => {
+    try {
+      // Using Aladhan API for prayer times
+      const response = await fetch(
+        `https://api.aladhan.com/v1/timingsByCity/${getDateStr(selectedDate)}?city=Minneapolis&country=USA&method=2`
+      );
+      const data = await response.json();
+      setPrayerTimes(data.data.timings);
+    } catch (error) {
+      console.error('Error fetching prayer times:', error);
+    }
+  };
+
+  const updatePrayerStatus = async (prayer, status) => {
+    if (!hasAccess('salah_tracking')) return;
     
-    setAllPrayerData(prev => {
-      const updated = { ...prev };
-      if (updated[dateKey]) {
-        const { [prayer]: removed, ...rest } = updated[dateKey];
-        updated[dateKey] = rest;
-      }
-      return updated;
-    });
+    const newData = { ...prayerData, [prayer]: status };
+    setPrayerData(newData);
     setEditingPrayer(null);
+
+    // Save to Firestore
+    try {
+      const dateStr = getDateStr(selectedDate);
+      await setDoc(doc(db, 'users', user.uid, 'prayers', dateStr), newData);
+      
+      // Add XP for on_time prayers
+      if (status === 'on_time') {
+        addXp(20);
+      } else if (status === 'late') {
+        addXp(10);
+      }
+    } catch (error) {
+      console.error('Error saving prayer status:', error);
+    }
   };
 
-  const getStatusIcon = (status) => {
-    if (status === 'on_time') return <Check className="status-icon on-time" size={18} />;
-    if (status === 'late') return <Clock className="status-icon late" size={18} />;
-    if (status === 'missed') return <X className="status-icon missed" size={18} />;
-    return null;
+  const getStatusInfo = (status) => {
+    return STATUS_OPTIONS.find(s => s.value === status) || STATUS_OPTIONS[3];
   };
-
-  const isPrayerPast = (prayerName) => {
-    if (!prayerTimes || !isToday(selectedDate)) return true;
-    const time = new Date(prayerTimes[prayerName]);
-    return time < new Date();
-  };
-
-  const canEdit = isToday(selectedDate) || isYesterday(selectedDate);
-  const isFutureDate = selectedDate > new Date() && !isToday(selectedDate);
 
   const navigateDate = (direction) => {
-    const newDate = direction === 'prev' 
-      ? subDays(selectedDate, 1) 
-      : addDays(selectedDate, 1);
+    const newDate = new Date(selectedDate);
+    newDate.setDate(newDate.getDate() + direction);
     
-    // Can't go more than 1 day into future
-    if (newDate > addDays(new Date(), 1)) return;
-    // Can't go more than 7 days into past
-    if (newDate < subDays(new Date(), 7)) return;
+    // Don't allow navigation to dates more than 1 day in the future
+    if (newDate > new Date(today.getTime() + 86400000)) return;
+    // Don't allow navigation to dates more than 7 days in the past
+    if (newDate < new Date(today.getTime() - 7 * 86400000)) return;
     
     setSelectedDate(newDate);
   };
 
-  const getDateLabel = () => {
-    if (isToday(selectedDate)) return 'Today';
-    if (isYesterday(selectedDate)) return 'Yesterday';
-    if (isTomorrow(selectedDate)) return 'Tomorrow';
-    return format(selectedDate, 'EEEE');
-  };
+  const completedToday = PRAYER_KEYS.filter(p => 
+    prayerData[p] === 'on_time' || prayerData[p] === 'late'
+  ).length;
 
-  // Calculate stats for selected date
-  const dayStats = {
-    onTime: Object.values(currentPrayers).filter(s => s === 'on_time').length,
-    late: Object.values(currentPrayers).filter(s => s === 'late').length,
-    missed: Object.values(currentPrayers).filter(s => s === 'missed').length,
-  };
-  const totalMarked = dayStats.onTime + dayStats.late + dayStats.missed;
-
-  // Get past 7 days for history
-  const pastWeek = Array.from({ length: 7 }, (_, i) => subDays(new Date(), i));
+  const onTimeToday = PRAYER_KEYS.filter(p => prayerData[p] === 'on_time').length;
 
   return (
     <div className="salah-page">
       <header className="page-header">
         <h1>🕌 Salah</h1>
-        <button className="history-btn" onClick={() => setShowHistory(!showHistory)}>
-          <Calendar size={18} />
-          <span>History</span>
-        </button>
+        <p className="subtitle">Track your daily prayers</p>
       </header>
 
       {/* Date Navigator */}
       <div className="date-navigator">
         <button 
-          className="nav-btn" 
-          onClick={() => navigateDate('prev')}
-          disabled={selectedDate <= subDays(new Date(), 7)}
+          className="nav-btn"
+          onClick={() => navigateDate(-1)}
+          disabled={selectedDate <= new Date(today.getTime() - 7 * 86400000)}
         >
           <ChevronLeft size={20} />
         </button>
+        
         <div className="date-display">
-          <span className="date-label">{getDateLabel()}</span>
-          <span className="date-full">{format(selectedDate, 'MMMM d, yyyy')}</span>
+          <span className="date-label">
+            {isToday ? 'Today' : isYesterday ? 'Yesterday' : isTomorrow ? 'Tomorrow' : ''}
+          </span>
+          <span className="date-value">
+            {selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+          </span>
         </div>
+        
         <button 
-          className="nav-btn" 
-          onClick={() => navigateDate('next')}
-          disabled={selectedDate >= addDays(new Date(), 1)}
+          className="nav-btn"
+          onClick={() => navigateDate(1)}
+          disabled={selectedDate >= new Date(today.getTime() + 86400000)}
         >
           <ChevronRight size={20} />
         </button>
       </div>
 
-      {/* Day Stats */}
-      {totalMarked > 0 && (
-        <div className="day-stats">
-          <div className="stat on-time">
-            <Check size={14} />
-            <span>{dayStats.onTime} On Time</span>
-          </div>
-          <div className="stat late">
-            <Clock size={14} />
-            <span>{dayStats.late} Late</span>
-          </div>
-          <div className="stat missed">
-            <X size={14} />
-            <span>{dayStats.missed} Missed</span>
+      {/* Progress Card */}
+      <div className="progress-card">
+        <div className="progress-ring-container">
+          <svg width="100" height="100" viewBox="0 0 100 100">
+            <circle
+              cx="50"
+              cy="50"
+              r="40"
+              fill="none"
+              stroke="var(--bg-surface-light)"
+              strokeWidth="8"
+            />
+            <circle
+              cx="50"
+              cy="50"
+              r="40"
+              fill="none"
+              stroke="var(--ring-salah)"
+              strokeWidth="8"
+              strokeLinecap="round"
+              strokeDasharray={`${(completedToday / 5) * 251.2} 251.2`}
+              transform="rotate(-90 50 50)"
+            />
+          </svg>
+          <div className="progress-text">
+            <span className="progress-value">{completedToday}</span>
+            <span className="progress-total">/5</span>
           </div>
         </div>
-      )}
-
-      {/* Future Date Notice */}
-      {isFutureDate && (
-        <div className="future-notice">
-          <span>🔮 Tomorrow's prayer times (view only)</span>
+        <div className="progress-stats">
+          <div className="stat">
+            <Check size={16} className="on-time" />
+            <span>{onTimeToday} on time</span>
+          </div>
+          <div className="stat">
+            <Clock size={16} className="late" />
+            <span>{completedToday - onTimeToday} late</span>
+          </div>
+          <div className="stat">
+            <X size={16} className="missed" />
+            <span>{5 - completedToday} {isToday ? 'remaining' : 'missed'}</span>
+          </div>
         </div>
-      )}
-
-      {/* Location Badge */}
-      {location && isToday(selectedDate) && (
-        <div className="location-badge">
-          <MapPin size={14} />
-          <span>Location detected</span>
-        </div>
-      )}
+      </div>
 
       {/* Prayer List */}
-      <div className="prayers-list">
-        {PRAYER_NAMES.map((prayer) => {
-          const time = prayerTimes ? new Date(prayerTimes[prayer]) : null;
-          const status = currentPrayers[prayer];
-          const isPast = isPrayerPast(prayer);
-          const showActions = canEdit && (isToday(selectedDate) ? isPast : true) && !status;
-          const isEditing = editingPrayer === prayer;
+      <div className="prayer-list">
+        {PRAYER_KEYS.map((prayer, index) => {
+          const Icon = PRAYER_ICONS[prayer];
+          const status = prayerData[prayer] || 'pending';
+          const statusInfo = getStatusInfo(status);
+          const time = prayerTimes?.[prayer.charAt(0).toUpperCase() + prayer.slice(1)];
+          const canEdit = hasAccess('salah_tracking') && !isFuture;
 
           return (
             <div 
-              key={prayer} 
-              className={`prayer-card ${status ? 'completed' : ''} ${isPast && !status && isToday(selectedDate) ? 'pending' : ''} ${isFutureDate ? 'future' : ''}`}
+              key={prayer}
+              className={`prayer-item ${status}`}
             >
-              <div className="prayer-main">
-                <span className="prayer-emoji">{PRAYER_ICONS[prayer]}</span>
-                <div className="prayer-info">
-                  <h3>{PRAYER_LABELS[prayer]}</h3>
-                  <span className="prayer-time">
-                    {time ? format(time, 'h:mm a') : '--:--'}
-                  </span>
-                </div>
-                {status && !isEditing && (
-                  <div className={`status-badge ${status.replace('_', '-')}`}>
-                    {getStatusIcon(status)}
-                    <span>{status === 'on_time' ? 'On Time' : status === 'late' ? 'Late' : 'Missed'}</span>
-                  </div>
-                )}
-                {status && canEdit && !isEditing && (
-                  <button 
-                    className="edit-btn"
-                    onClick={() => setEditingPrayer(prayer)}
-                    title="Edit"
-                  >
-                    <Edit2 size={16} />
-                  </button>
-                )}
+              <div className="prayer-icon">
+                <Icon size={22} />
               </div>
               
-              {/* Show actions for unmarked prayers */}
-              {showActions && (
-                <div className="prayer-actions">
-                  <button 
-                    className="action-btn on-time"
-                    onClick={() => markPrayer(prayer, 'on_time')}
-                  >
-                    <Check size={16} /> On Time
-                  </button>
-                  <button 
-                    className="action-btn late"
-                    onClick={() => markPrayer(prayer, 'late')}
-                  >
-                    <Clock size={16} /> Late
-                  </button>
-                  <button 
-                    className="action-btn missed"
-                    onClick={() => markPrayer(prayer, 'missed')}
-                  >
-                    <X size={16} /> Missed
-                  </button>
-                </div>
-              )}
+              <div className="prayer-info">
+                <h3>{PRAYER_NAMES[index]}</h3>
+                <span className="prayer-time">{time || '--:--'}</span>
+              </div>
 
-              {/* Edit mode for marked prayers */}
-              {isEditing && (
-                <div className="prayer-actions editing">
-                  <div className="edit-header">
-                    <span>Change status:</span>
-                    <button className="cancel-edit" onClick={() => setEditingPrayer(null)}>
-                      Cancel
+              <div className="prayer-status">
+                {editingPrayer === prayer ? (
+                  <div className="status-options">
+                    {STATUS_OPTIONS.slice(0, 3).map(opt => (
+                      <button
+                        key={opt.value}
+                        className={`status-btn ${opt.value}`}
+                        onClick={() => updatePrayerStatus(prayer, opt.value)}
+                        title={opt.label}
+                      >
+                        <opt.icon size={16} />
+                      </button>
+                    ))}
+                    <button
+                      className="status-btn cancel"
+                      onClick={() => setEditingPrayer(null)}
+                    >
+                      <X size={16} />
                     </button>
                   </div>
-                  <div className="edit-buttons">
-                    <button 
-                      className={`action-btn on-time ${status === 'on_time' ? 'current' : ''}`}
-                      onClick={() => markPrayer(prayer, 'on_time')}
-                    >
-                      <Check size={16} /> On Time
-                    </button>
-                    <button 
-                      className={`action-btn late ${status === 'late' ? 'current' : ''}`}
-                      onClick={() => markPrayer(prayer, 'late')}
-                    >
-                      <Clock size={16} /> Late
-                    </button>
-                    <button 
-                      className={`action-btn missed ${status === 'missed' ? 'current' : ''}`}
-                      onClick={() => markPrayer(prayer, 'missed')}
-                    >
-                      <X size={16} /> Missed
-                    </button>
-                  </div>
-                  <button 
-                    className="clear-btn"
-                    onClick={() => clearPrayer(prayer)}
+                ) : (
+                  <div 
+                    className={`status-badge ${status}`}
+                    onClick={() => canEdit && setEditingPrayer(prayer)}
+                    style={{ cursor: canEdit ? 'pointer' : 'default' }}
                   >
-                    <Trash2 size={14} /> Clear Status
-                  </button>
-                </div>
-              )}
+                    <statusInfo.icon size={14} />
+                    <span>{statusInfo.label}</span>
+                    {canEdit && <Edit2 size={12} className="edit-icon" />}
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}
       </div>
 
-      {/* XP Summary (only for today) */}
-      {isToday(selectedDate) && totalMarked > 0 && (
-        <div className="xp-earned">
-          <span>XP Earned Today: </span>
-          <strong>{dayStats.onTime * 50 + dayStats.late * 20}</strong>
+      {/* Feature locked notice for free users */}
+      {!hasAccess('salah_tracking') && (
+        <div className="feature-notice">
+          <Lock size={16} />
+          <span>Prayer tracking is a Pro feature. <a href="/pricing">Upgrade</a></span>
         </div>
       )}
 
-      {/* Week History Panel */}
-      {showHistory && (
-        <div className="history-panel">
-          <h3>📅 Past Week</h3>
-          <div className="history-grid">
-            {pastWeek.map((date) => {
-              const dayPrayers = getPrayersForDate(date);
-              const completed = Object.values(dayPrayers).filter(s => s === 'on_time' || s === 'late').length;
-              const missed = Object.values(dayPrayers).filter(s => s === 'missed').length;
-              const isSelected = format(date, 'yyyy-MM-dd') === format(selectedDate, 'yyyy-MM-dd');
-              
-              return (
-                <button 
-                  key={date.toISOString()} 
-                  className={`history-day ${isSelected ? 'selected' : ''} ${completed === 5 ? 'perfect' : ''}`}
-                  onClick={() => setSelectedDate(date)}
-                >
-                  <span className="day-name">{format(date, 'EEE')}</span>
-                  <span className="day-num">{format(date, 'd')}</span>
-                  <div className="day-dots">
-                    {PRAYER_NAMES.map((p) => (
-                      <span 
-                        key={p} 
-                        className={`dot ${dayPrayers[p] || 'empty'}`}
-                      />
-                    ))}
-                  </div>
-                  {completed > 0 && (
-                    <span className="day-count">{completed}/5</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          
-          {/* Legend */}
-          <div className="history-legend">
-            <span><span className="dot on_time" /> On Time</span>
-            <span><span className="dot late" /> Late</span>
-            <span><span className="dot missed" /> Missed</span>
+      {/* Week History - Pro Feature */}
+      {hasAccess('salah_history') && weekHistory.length > 0 && (
+        <div className="week-history">
+          <h3>This Week</h3>
+          <div className="history-dots">
+            {weekHistory.map((day, i) => (
+              <div 
+                key={i} 
+                className={`day-dot ${day.date.toDateString() === selectedDate.toDateString() ? 'selected' : ''}`}
+                onClick={() => setSelectedDate(day.date)}
+              >
+                <span className="day-name">
+                  {day.date.toLocaleDateString('en-US', { weekday: 'short' }).charAt(0)}
+                </span>
+                <div className="dot-progress">
+                  {[...Array(5)].map((_, j) => (
+                    <span 
+                      key={j} 
+                      className={`mini-dot ${j < day.completed ? 'filled' : ''}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -373,39 +350,18 @@ function Salah() {
           padding-bottom: 100px;
         }
         .page-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
           margin-bottom: 20px;
         }
-        .page-header h1 {
-          font-size: 28px;
-        }
-        .history-btn {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          background: var(--bg-surface);
-          border: none;
-          padding: 10px 14px;
-          border-radius: 10px;
-          color: var(--text-secondary);
-          font-size: 13px;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-        .history-btn:hover {
-          background: var(--bg-surface-light);
-          color: var(--gold);
-        }
-
+        .page-header h1 { font-size: 28px; margin-bottom: 4px; }
+        .subtitle { color: var(--text-muted); font-size: 14px; }
+        
         .date-navigator {
           display: flex;
           align-items: center;
           justify-content: space-between;
           background: var(--bg-surface);
           padding: 12px 16px;
-          border-radius: 16px;
+          border-radius: 12px;
           margin-bottom: 16px;
         }
         .nav-btn {
@@ -414,15 +370,11 @@ function Salah() {
           width: 36px;
           height: 36px;
           border-radius: 10px;
+          color: var(--text-primary);
+          cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          color: var(--text-primary);
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-        .nav-btn:hover:not(:disabled) {
-          background: var(--primary);
         }
         .nav-btn:disabled {
           opacity: 0.3;
@@ -433,338 +385,215 @@ function Salah() {
         }
         .date-label {
           display: block;
-          font-size: 18px;
+          font-size: 12px;
+          color: var(--gold);
           font-weight: 600;
+        }
+        .date-value {
+          font-size: 14px;
+          color: var(--text-secondary);
+        }
+        
+        .progress-card {
+          display: flex;
+          align-items: center;
+          gap: 24px;
+          background: linear-gradient(135deg, var(--primary) 0%, #1a4a3a 100%);
+          padding: 24px;
+          border-radius: 16px;
+          margin-bottom: 20px;
+        }
+        .progress-ring-container {
+          position: relative;
+          flex-shrink: 0;
+        }
+        .progress-text {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          text-align: center;
+        }
+        .progress-value {
+          font-size: 28px;
+          font-weight: 700;
           font-family: 'Space Grotesk', sans-serif;
         }
-        .date-full {
-          font-size: 12px;
+        .progress-total {
+          font-size: 16px;
           color: var(--text-muted);
         }
-
-        .day-stats {
+        .progress-stats {
           display: flex;
+          flex-direction: column;
           gap: 8px;
-          margin-bottom: 16px;
         }
-        .day-stats .stat {
-          flex: 1;
+        .stat {
           display: flex;
           align-items: center;
-          justify-content: center;
-          gap: 6px;
-          padding: 10px;
-          border-radius: 10px;
-          font-size: 12px;
-          font-weight: 500;
-        }
-        .day-stats .stat.on-time {
-          background: rgba(46, 204, 113, 0.15);
-          color: var(--success);
-        }
-        .day-stats .stat.late {
-          background: rgba(241, 196, 15, 0.15);
-          color: var(--warning);
-        }
-        .day-stats .stat.missed {
-          background: rgba(231, 76, 60, 0.15);
-          color: var(--error);
-        }
-
-        .future-notice {
-          background: rgba(52, 152, 219, 0.15);
-          color: var(--info);
-          padding: 12px 16px;
-          border-radius: 10px;
+          gap: 8px;
           font-size: 13px;
-          text-align: center;
-          margin-bottom: 16px;
+          color: var(--text-secondary);
         }
-
-        .location-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          background: var(--bg-surface);
-          padding: 8px 12px;
-          border-radius: 20px;
-          font-size: 12px;
-          color: var(--success);
-          margin-bottom: 16px;
-        }
-
-        .prayers-list {
+        .stat .on-time { color: var(--success); }
+        .stat .late { color: var(--warning); }
+        .stat .missed { color: var(--error); }
+        
+        .prayer-list {
           display: flex;
           flex-direction: column;
           gap: 10px;
+          margin-bottom: 20px;
         }
-        .prayer-card {
-          background: var(--bg-surface);
-          border-radius: 16px;
-          padding: 16px;
-          transition: all 0.2s ease;
-        }
-        .prayer-card.completed {
-          border-left: 4px solid var(--success);
-        }
-        .prayer-card.pending {
-          border-left: 4px solid var(--warning);
-        }
-        .prayer-card.future {
-          opacity: 0.7;
-        }
-        .prayer-main {
+        .prayer-item {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 14px;
+          background: var(--bg-surface);
+          padding: 16px;
+          border-radius: 14px;
+          border-left: 4px solid var(--text-muted);
         }
-        .prayer-emoji {
-          font-size: 28px;
+        .prayer-item.on_time { border-left-color: var(--success); }
+        .prayer-item.late { border-left-color: var(--warning); }
+        .prayer-item.missed { border-left-color: var(--error); }
+        
+        .prayer-icon {
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
+          background: var(--bg-surface-light);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--gold);
         }
         .prayer-info {
           flex: 1;
         }
-        .prayer-info h3 {
-          font-size: 17px;
-          margin-bottom: 2px;
-        }
-        .prayer-time {
-          color: var(--text-muted);
-          font-size: 13px;
-        }
+        .prayer-info h3 { font-size: 15px; margin-bottom: 2px; }
+        .prayer-time { font-size: 12px; color: var(--text-muted); }
+        
         .status-badge {
           display: flex;
           align-items: center;
           gap: 6px;
-          padding: 6px 12px;
+          padding: 8px 14px;
           border-radius: 20px;
           font-size: 12px;
           font-weight: 500;
+          background: var(--bg-surface-light);
+          color: var(--text-muted);
         }
-        .status-badge.on-time {
-          background: rgba(46, 204, 113, 0.2);
+        .status-badge.on_time {
+          background: rgba(46,204,113,0.2);
           color: var(--success);
         }
         .status-badge.late {
-          background: rgba(241, 196, 15, 0.2);
+          background: rgba(241,196,15,0.2);
           color: var(--warning);
         }
         .status-badge.missed {
-          background: rgba(231, 76, 60, 0.2);
+          background: rgba(231,76,60,0.2);
           color: var(--error);
         }
-        .status-icon {
-          width: 16px;
-          height: 16px;
+        .edit-icon {
+          opacity: 0;
+          margin-left: 4px;
         }
-
-        .prayer-actions {
+        .status-badge:hover .edit-icon { opacity: 0.7; }
+        
+        .status-options {
           display: flex;
-          gap: 8px;
-          margin-top: 12px;
-          padding-top: 12px;
-          border-top: 1px solid var(--bg-surface-light);
-        }
-        .action-btn {
-          flex: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
           gap: 6px;
-          padding: 10px;
+        }
+        .status-btn {
+          width: 36px;
+          height: 36px;
           border-radius: 10px;
           border: none;
-          font-size: 12px;
-          font-weight: 600;
           cursor: pointer;
-          transition: all 0.2s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
-        .action-btn.on-time {
-          background: rgba(46, 204, 113, 0.15);
+        .status-btn.on_time {
+          background: rgba(46,204,113,0.2);
           color: var(--success);
         }
-        .action-btn.on-time:hover {
-          background: var(--success);
-          color: white;
-        }
-        .action-btn.late {
-          background: rgba(241, 196, 15, 0.15);
+        .status-btn.late {
+          background: rgba(241,196,15,0.2);
           color: var(--warning);
         }
-        .action-btn.late:hover {
-          background: var(--warning);
-          color: var(--bg-primary);
-        }
-        .action-btn.missed {
-          background: rgba(231, 76, 60, 0.15);
+        .status-btn.missed {
+          background: rgba(231,76,60,0.2);
           color: var(--error);
         }
-        .action-btn.missed:hover {
-          background: var(--error);
-          color: white;
-        }
-        .action-btn.current {
-          ring: 2px solid white;
-          box-shadow: 0 0 0 2px white;
-        }
-        .edit-btn {
+        .status-btn.cancel {
           background: var(--bg-surface-light);
-          border: none;
-          width: 32px;
-          height: 32px;
-          border-radius: 8px;
+          color: var(--text-muted);
+        }
+        
+        .feature-notice {
           display: flex;
           align-items: center;
-          justify-content: center;
+          gap: 8px;
+          padding: 14px;
+          background: var(--bg-surface);
+          border-radius: 12px;
+          font-size: 13px;
           color: var(--text-muted);
-          cursor: pointer;
-          transition: all 0.2s ease;
-          margin-left: 8px;
+          margin-bottom: 20px;
         }
-        .edit-btn:hover {
-          background: var(--primary);
+        .feature-notice a {
           color: var(--gold);
+          text-decoration: none;
+          font-weight: 600;
         }
-        .prayer-actions.editing {
-          flex-direction: column;
-          gap: 12px;
+        
+        .week-history {
+          background: var(--bg-surface);
+          padding: 16px;
+          border-radius: 14px;
         }
-        .edit-header {
+        .week-history h3 {
+          font-size: 14px;
+          color: var(--text-secondary);
+          margin-bottom: 14px;
+          text-align: center;
+        }
+        .history-dots {
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          font-size: 12px;
-          color: var(--text-muted);
         }
-        .cancel-edit {
-          background: none;
-          border: none;
-          color: var(--gold);
-          font-size: 12px;
-          cursor: pointer;
-        }
-        .edit-buttons {
-          display: flex;
-          gap: 8px;
-        }
-        .clear-btn {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          padding: 8px;
-          background: rgba(231,76,60,0.1);
-          border: 1px solid rgba(231,76,60,0.3);
-          border-radius: 8px;
-          color: var(--error);
-          font-size: 12px;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-        .clear-btn:hover {
-          background: var(--error);
-          color: white;
-        }
-
-        .xp-earned {
-          text-align: center;
-          margin-top: 20px;
-          padding: 16px;
-          background: var(--bg-surface);
-          border-radius: 12px;
-          color: var(--text-secondary);
-        }
-        .xp-earned strong {
-          color: var(--gold);
-          font-size: 20px;
-          margin-left: 8px;
-        }
-
-        .history-panel {
-          margin-top: 24px;
-          background: var(--bg-surface);
-          border-radius: 16px;
-          padding: 20px;
-          animation: fadeIn 0.3s ease-out;
-        }
-        .history-panel h3 {
-          font-size: 16px;
-          margin-bottom: 16px;
-        }
-        .history-grid {
-          display: grid;
-          grid-template-columns: repeat(7, 1fr);
-          gap: 6px;
-        }
-        .history-day {
+        .day-dot {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 4px;
-          padding: 10px 4px;
-          background: var(--bg-surface-light);
-          border: 2px solid transparent;
-          border-radius: 12px;
+          gap: 6px;
+          padding: 8px;
+          border-radius: 10px;
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: background 0.2s;
         }
-        .history-day:hover {
-          border-color: var(--primary);
-        }
-        .history-day.selected {
-          border-color: var(--gold);
-          background: rgba(212, 175, 55, 0.1);
-        }
-        .history-day.perfect {
-          background: rgba(46, 204, 113, 0.15);
-        }
+        .day-dot:hover { background: var(--bg-surface-light); }
+        .day-dot.selected { background: var(--primary); }
         .day-name {
-          font-size: 10px;
+          font-size: 11px;
           color: var(--text-muted);
-          text-transform: uppercase;
-        }
-        .day-num {
-          font-size: 16px;
           font-weight: 600;
-          font-family: 'Space Grotesk', sans-serif;
         }
-        .day-dots {
+        .dot-progress {
           display: flex;
           gap: 2px;
         }
-        .dot {
+        .mini-dot {
           width: 6px;
           height: 6px;
           border-radius: 50%;
-          background: var(--bg-primary);
+          background: var(--bg-surface-light);
         }
-        .dot.on_time { background: var(--success); }
-        .dot.late { background: var(--warning); }
-        .dot.missed { background: var(--error); }
-        .day-count {
-          font-size: 10px;
-          color: var(--text-muted);
-        }
-
-        .history-legend {
-          display: flex;
-          justify-content: center;
-          gap: 16px;
-          margin-top: 16px;
-          padding-top: 16px;
-          border-top: 1px solid var(--bg-surface-light);
-        }
-        .history-legend span {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 11px;
-          color: var(--text-muted);
-        }
-        .history-legend .dot {
-          width: 8px;
-          height: 8px;
-        }
+        .mini-dot.filled { background: var(--ring-salah); }
       `}</style>
     </div>
   );

@@ -1,677 +1,547 @@
 import React, { useState, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
 import { Link } from 'react-router-dom';
-import { 
-  Sun, Moon, Sunrise, BookOpen, Dumbbell, CheckSquare, 
-  TrendingUp, Award, Flame, Target, ChevronRight, Edit2, Check,
-  Calendar, Brain, Scale
+import { useAuth, TIERS, TIER_LABELS } from '../context/AuthContext';
+import { useApp } from '../context/AppContext';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import {
+  Sun, Moon, Sunrise, Sunset,
+  BookOpen, Calendar, Dumbbell, ListChecks,
+  Crown, Star, Trophy, Flame, Award,
+  ChevronRight, Edit2, BarChart3
 } from 'lucide-react';
 import ProgressRing from '../components/ProgressRing';
 
-function Dashboard() {
-  const { 
-    xp, level, streak, prayerTimes, todayPrayers,
-    quranStats, workoutStats, quizHistory, userName, setUserName
-  } = useApp();
-  
-  const [editingName, setEditingName] = useState(false);
-  const [tempName, setTempName] = useState(userName);
-  const [currentTime, setCurrentTime] = useState(new Date());
+const TOTAL_QURAN_PAGES = 604;
 
-  // Update time every minute
+function Dashboard() {
+  const { user, userProfile, getTier, getTierLabel, updateUserProfile } = useAuth();
+  const { userXp, userLevel, userStreak, calculateLevel } = useApp();
+  
+  const [greeting, setGreeting] = useState('');
+  const [greetingIcon, setGreetingIcon] = useState(null);
+  const [editingName, setEditingName] = useState(false);
+  const [newName, setNewName] = useState('');
+  
+  const [stats, setStats] = useState({
+    salahToday: 0,
+    quranMemorized: 0,
+    quranProgress: 0,
+    quizScore: 0,
+    workoutDays: 0,
+    weightLost: 0,
+    streak: 0
+  });
+
+  const tier = getTier();
+  const tierLabel = getTierLabel();
+
+  // Set greeting based on time
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
-    return () => clearInterval(timer);
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) {
+      setGreeting('Good Morning');
+      setGreetingIcon(<Sunrise size={24} className="greeting-icon sunrise" />);
+    } else if (hour >= 12 && hour < 17) {
+      setGreeting('Good Afternoon');
+      setGreetingIcon(<Sun size={24} className="greeting-icon sun" />);
+    } else if (hour >= 17 && hour < 21) {
+      setGreeting('Good Evening');
+      setGreetingIcon(<Sunset size={24} className="greeting-icon sunset" />);
+    } else {
+      setGreeting('Good Night');
+      setGreetingIcon(<Moon size={24} className="greeting-icon moon" />);
+    }
   }, []);
 
-  const getGreeting = () => {
-    const hour = currentTime.getHours();
-    if (hour >= 5 && hour < 12) return { text: 'Good Morning', icon: <Sunrise className="greeting-icon sunrise" />, emoji: '🌅' };
-    if (hour >= 12 && hour < 17) return { text: 'Good Afternoon', icon: <Sun className="greeting-icon sun" />, emoji: '☀️' };
-    if (hour >= 17 && hour < 21) return { text: 'Good Evening', icon: <Sunset className="greeting-icon sunset" />, emoji: '🌇' };
-    return { text: 'Good Night', icon: <Moon className="greeting-icon moon" />, emoji: '🌙' };
-  };
-
-  const greeting = getGreeting();
-
-  const saveName = () => {
-    if (tempName.trim()) {
-      setUserName(tempName.trim());
+  // Load user stats from Firestore
+  useEffect(() => {
+    if (user) {
+      loadUserStats();
     }
-    setEditingName(false);
-  };
+  }, [user]);
 
-  // Calculate prayer progress
-  const prayerNames = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'];
-  const completedPrayers = prayerNames.filter(p => todayPrayers[p]).length;
-  const prayerProgress = (completedPrayers / 5) * 100;
-
-  // Calculate XP for next level
-  const xpForCurrentLevel = level * 100;
-  const xpProgress = ((xp % 100) / 100) * 100;
-
-  // Get next prayer
-  const getNextPrayer = () => {
-    if (!prayerTimes) return null;
-    const now = new Date();
-    for (const prayer of prayerNames) {
-      const time = new Date(prayerTimes[prayer]);
-      if (time > now && !todayPrayers[prayer]) {
-        return { name: prayer, time };
+  const loadUserStats = async () => {
+    try {
+      // Load salah stats
+      const today = new Date().toISOString().split('T')[0];
+      const salahDoc = await getDoc(doc(db, 'users', user.uid, 'prayers', today));
+      if (salahDoc.exists()) {
+        const prayers = salahDoc.data();
+        const completed = Object.values(prayers).filter(s => s === 'on_time' || s === 'late').length;
+        setStats(prev => ({ ...prev, salahToday: completed }));
       }
+
+      // Load workout stats
+      const workoutDoc = await getDoc(doc(db, 'users', user.uid, 'fitness', 'workout'));
+      if (workoutDoc.exists()) {
+        const workout = workoutDoc.data();
+        const completedDays = Object.keys(workout.completedWorkouts || {}).length;
+        const currentWeight = workout.currentWeight;
+        const startWeight = workout.weightHistory?.[0]?.weight;
+        const lost = startWeight && currentWeight ? (startWeight - currentWeight).toFixed(1) : 0;
+        setStats(prev => ({ 
+          ...prev, 
+          workoutDays: completedDays,
+          weightLost: lost 
+        }));
+      }
+
+      // Load quran/quiz stats (now using pages)
+      const quranDoc = await getDoc(doc(db, 'users', user.uid, 'quran', 'memorization'));
+      if (quranDoc.exists()) {
+        const quran = quranDoc.data();
+        const memorizedPages = quran.progress?.memorizedPages?.length || 0;
+        const quranProgressPercent = (memorizedPages / TOTAL_QURAN_PAGES) * 100;
+        setStats(prev => ({ 
+          ...prev, 
+          quranMemorized: memorizedPages,
+          quranProgress: quranProgressPercent,
+          quizScore: quran.progress?.points || 0,
+          streak: quran.progress?.streak || 0
+        }));
+      }
+    } catch (error) {
+      console.error('Error loading stats:', error);
     }
-    return null;
   };
 
-  const nextPrayer = getNextPrayer();
-
-  // Format time
-  const formatTime = (date) => {
-    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const handleNameSave = async () => {
+    if (newName.trim()) {
+      await updateUserProfile({ name: newName.trim() });
+      setEditingName(false);
+    }
   };
 
-  // Get motivational message
-  const getMotivation = () => {
-    if (completedPrayers === 5) return "All prayers complete! Mashallah! 🌟";
-    if (streak >= 7) return `${streak} day streak! Keep going! 🔥`;
-    if (completedPrayers >= 3) return "Great progress today! 💪";
-    return "Every good deed counts! 🌱";
+  const userName = userProfile?.name || user?.displayName || 'User';
+  const levelProgress = calculateLevel(userXp);
+
+  // Tier badge colors
+  const tierColors = {
+    [TIERS.FREE]: { bg: '#374151', text: '#9ca3af' },
+    [TIERS.PRO]: { bg: '#92400e', text: '#fbbf24' },
+    [TIERS.PRO_PLUS]: { bg: '#5b21b6', text: '#a78bfa' }
   };
 
   return (
     <div className="dashboard">
-      {/* Header with Greeting */}
-      <header className="dash-header">
+      {/* Header Section */}
+      <header className="dashboard-header">
         <div className="greeting-section">
-          <div className="greeting-row">
-            <span className="greeting-emoji">{greeting.emoji}</span>
-            <span className="greeting-text">{greeting.text},</span>
+          {greetingIcon}
+          <div>
+            <p className="greeting-text">{greeting},</p>
+            {editingName ? (
+              <div className="name-edit">
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder={userName}
+                  autoFocus
+                />
+                <button onClick={handleNameSave}>Save</button>
+                <button onClick={() => setEditingName(false)} className="cancel">Cancel</button>
+              </div>
+            ) : (
+              <h1 className="user-name" onClick={() => { setNewName(userName); setEditingName(true); }}>
+                {userName} <Edit2 size={14} className="edit-icon" />
+              </h1>
+            )}
           </div>
-          {editingName ? (
-            <div className="name-edit">
-              <input
-                type="text"
-                value={tempName}
-                onChange={(e) => setTempName(e.target.value)}
-                placeholder="Enter your name"
-                autoFocus
-                onKeyPress={(e) => e.key === 'Enter' && saveName()}
-              />
-              <button onClick={saveName}><Check size={18} /></button>
-            </div>
-          ) : (
-            <div className="name-row">
-              <h1 className="user-name">{userName || 'Friend'}</h1>
-              <button className="edit-name-btn" onClick={() => { setTempName(userName); setEditingName(true); }}>
-                <Edit2 size={14} />
-              </button>
-            </div>
-          )}
         </div>
-        <div className="header-stats">
-          <div className="level-badge">
-            <Award size={16} />
-            <span>Lvl {level}</span>
-          </div>
+        
+        <div className="badges-row">
+          <span 
+            className="tier-badge"
+            style={{ 
+              background: tierColors[tier].bg,
+              color: tierColors[tier].text
+            }}
+          >
+            {tier !== TIERS.FREE && <Crown size={12} />}
+            {tierLabel}
+          </span>
+          <span className="level-badge">
+            <Trophy size={12} />
+            Lvl {levelProgress.level}
+          </span>
         </div>
       </header>
 
-      {/* Motivation Banner */}
-      <div className="motivation-banner">
-        <span>{getMotivation()}</span>
+      {/* Level Progress Bar */}
+      <div className="level-progress-card">
+        <div className="level-info">
+          <span>Level {levelProgress.level}</span>
+          <span className="xp-text">{userXp} XP</span>
+        </div>
+        <div className="progress-bar">
+          <div 
+            className="progress-fill"
+            style={{ width: `${levelProgress.progress}%` }}
+          />
+        </div>
+        <span className="xp-to-next">{levelProgress.xpToNext} XP to Level {levelProgress.level + 1}</span>
       </div>
 
-      {/* XP Progress Bar */}
-      <div className="xp-card">
-        <div className="xp-header">
-          <span className="xp-label">Level {level} Progress</span>
-          <span className="xp-value">{xp % 100} / 100 XP</span>
-        </div>
-        <div className="xp-bar">
-          <div className="xp-fill" style={{ width: `${xpProgress}%` }} />
-        </div>
-        <span className="xp-total">{xp} total XP earned</span>
-      </div>
-
-      {/* Quick Stats Grid */}
-      <div className="stats-grid">
+      {/* Stats Row */}
+      <div className="stats-row">
         <div className="stat-card streak">
-          <Flame size={24} />
-          <div className="stat-info">
-            <span className="stat-value">{streak}</span>
-            <span className="stat-label">Day Streak</span>
-          </div>
+          <Flame size={20} />
+          <span className="stat-value">{userStreak}</span>
+          <span className="stat-label">Day Streak</span>
         </div>
-        <div className="stat-card prayers">
-          <Target size={24} />
-          <div className="stat-info">
-            <span className="stat-value">{completedPrayers}/5</span>
-            <span className="stat-label">Prayers</span>
-          </div>
+        <div className="stat-card xp">
+          <Star size={20} />
+          <span className="stat-value">{userXp}</span>
+          <span className="stat-label">Total XP</span>
+        </div>
+        <div className="stat-card awards">
+          <Award size={20} />
+          <span className="stat-value">{levelProgress.level}</span>
+          <span className="stat-label">Level</span>
         </div>
       </div>
 
-      {/* Next Prayer Card */}
-      {nextPrayer && (
-        <Link to="/salah" className="next-prayer-card">
-          <div className="prayer-glow" />
-          <div className="prayer-content">
-            <span className="next-label">Next Prayer</span>
-            <h3 className="prayer-name">{nextPrayer.name.charAt(0).toUpperCase() + nextPrayer.name.slice(1)}</h3>
-            <span className="prayer-time">{formatTime(nextPrayer.time)}</span>
+      {/* Quick Access Cards */}
+      <section className="quick-access">
+        <h2>Today's Progress</h2>
+        
+        <div className="progress-cards">
+          <Link to="/salah" className="progress-card salah">
+            <div className="card-icon">
+              <Calendar size={24} />
+            </div>
+            <div className="card-content">
+              <h3>Salah</h3>
+              <p className="card-stat">{stats.salahToday}/5 completed</p>
+            </div>
+            <ProgressRing 
+              progress={(stats.salahToday / 5) * 100}
+              size={50}
+              strokeWidth={4}
+              color="var(--ring-salah)"
+            />
+            <ChevronRight size={18} className="chevron" />
+          </Link>
+
+          <Link to="/quran" className="progress-card quran">
+            <div className="card-icon">
+              <BookOpen size={24} />
+            </div>
+            <div className="card-content">
+              <h3>Quran</h3>
+              <p className="card-stat">{stats.quranMemorized} pages • {stats.quranProgress.toFixed(1)}%</p>
+              <div className="mini-progress-bar">
+                <div className="mini-progress-fill" style={{ width: `${stats.quranProgress}%` }} />
+              </div>
+            </div>
+            <div className="points-badge">
+              <Star size={12} />
+              {stats.quizScore}
+            </div>
+            <ChevronRight size={18} className="chevron" />
+          </Link>
+
+          <Link to="/workout" className="progress-card workout">
+            <div className="card-icon">
+              <Dumbbell size={24} />
+            </div>
+            <div className="card-content">
+              <h3>Workout</h3>
+              <p className="card-stat">{stats.workoutDays} days • {stats.weightLost > 0 ? `-${stats.weightLost}lbs` : 'Start today!'}</p>
+            </div>
+            <ChevronRight size={18} className="chevron" />
+          </Link>
+
+          <Link to="/habits" className="progress-card habits">
+            <div className="card-icon">
+              <ListChecks size={24} />
+            </div>
+            <div className="card-content">
+              <h3>Habits</h3>
+              <p className="card-stat">Build your routine</p>
+            </div>
+            <ChevronRight size={18} className="chevron" />
+          </Link>
+        </div>
+      </section>
+
+      {/* Upgrade Banner for Free Users */}
+      {tier === TIERS.FREE && (
+        <Link to="/pricing" className="upgrade-banner">
+          <Crown size={24} />
+          <div>
+            <h4>Upgrade to Pro</h4>
+            <p>Unlock Quran memorization, workout tracking, and more!</p>
           </div>
-          <ChevronRight size={24} />
+          <ChevronRight size={20} />
         </Link>
       )}
-
-      {/* Progress Rings */}
-      <div className="rings-section">
-        <h2>Today's Progress</h2>
-        <div className="rings-grid">
-          <Link to="/salah" className="ring-item">
-            <ProgressRing progress={prayerProgress} color="#2ecc71" size={70} strokeWidth={6}>
-              <span className="ring-value">{completedPrayers}</span>
-            </ProgressRing>
-            <span className="ring-label">Salah</span>
-          </Link>
-          <Link to="/quran" className="ring-item">
-            <ProgressRing progress={quranStats.todayProgress} color="#d4af37" size={70} strokeWidth={6}>
-              <BookOpen size={20} />
-            </ProgressRing>
-            <span className="ring-label">Quran</span>
-          </Link>
-          <Link to="/workout" className="ring-item">
-            <ProgressRing progress={workoutStats.todayProgress} color="#e74c3c" size={70} strokeWidth={6}>
-              <Dumbbell size={20} />
-            </ProgressRing>
-            <span className="ring-label">Workout</span>
-          </Link>
-          <Link to="/habits" className="ring-item">
-            <ProgressRing progress={70} color="#9b59b6" size={70} strokeWidth={6}>
-              <CheckSquare size={20} />
-            </ProgressRing>
-            <span className="ring-label">Habits</span>
-          </Link>
-        </div>
-      </div>
-
-      {/* Tracking Summary Cards */}
-      <div className="tracking-section">
-        <h2>Your Progress</h2>
-        
-        {/* Quran Stats */}
-        <div className="tracking-card quran">
-          <div className="tracking-icon">
-            <BookOpen size={20} />
-          </div>
-          <div className="tracking-content">
-            <h4>Quran Journey</h4>
-            <div className="tracking-stats">
-              <div className="track-stat">
-                <span className="track-value">{quranStats.pagesMemorized}</span>
-                <span className="track-label">Pages Memorized</span>
-              </div>
-              <div className="track-stat">
-                <span className="track-value">{quranStats.pagesRevised}</span>
-                <span className="track-label">Pages Revised</span>
-              </div>
-              <div className="track-stat">
-                <span className="track-value">{quranStats.quizzesTaken}</span>
-                <span className="track-label">Quizzes</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Quiz Stats */}
-        <div className="tracking-card quiz">
-          <div className="tracking-icon">
-            <Brain size={20} />
-          </div>
-          <div className="tracking-content">
-            <h4>Quiz Performance</h4>
-            <div className="tracking-stats">
-              <div className="track-stat">
-                <span className="track-value">{quizHistory.totalQuizzes}</span>
-                <span className="track-label">Total Quizzes</span>
-              </div>
-              <div className="track-stat">
-                <span className="track-value">{quizHistory.averageScore}%</span>
-                <span className="track-label">Avg Score</span>
-              </div>
-              <div className="track-stat">
-                <span className="track-value">{quizHistory.totalMistakes}</span>
-                <span className="track-label">Mistakes</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Workout Stats */}
-        <div className="tracking-card workout">
-          <div className="tracking-icon">
-            <Scale size={20} />
-          </div>
-          <div className="tracking-content">
-            <h4>Fitness Tracker</h4>
-            <div className="tracking-stats">
-              <div className="track-stat">
-                <span className="track-value">{workoutStats.workoutsCompleted}</span>
-                <span className="track-label">Workouts</span>
-              </div>
-              <div className="track-stat">
-                <span className="track-value">{workoutStats.currentWeight || '--'}</span>
-                <span className="track-label">Current lbs</span>
-              </div>
-              <div className="track-stat">
-                <span className="track-value">{workoutStats.weekStreak}</span>
-                <span className="track-label">Week Streak</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="quick-actions">
-        <h2>Quick Actions</h2>
-        <div className="actions-grid">
-          <Link to="/salah" className="action-btn">
-            <span className="action-emoji">🕌</span>
-            <span>Salah</span>
-          </Link>
-          <Link to="/quran" className="action-btn">
-            <span className="action-emoji">📖</span>
-            <span>Quran</span>
-          </Link>
-          <Link to="/workout" className="action-btn">
-            <span className="action-emoji">💪</span>
-            <span>Workout</span>
-          </Link>
-          <Link to="/habits" className="action-btn">
-            <span className="action-emoji">✅</span>
-            <span>Habits</span>
-          </Link>
-        </div>
-      </div>
 
       <style>{`
         .dashboard {
           padding: 20px;
           padding-bottom: 100px;
-          animation: fadeIn 0.4s ease-out;
+          animation: fadeIn 0.3s ease-out;
         }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
+        
+        .dashboard-header {
+          margin-bottom: 20px;
         }
-
-        .dash-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          margin-bottom: 16px;
-        }
+        
         .greeting-section {
-          flex: 1;
-        }
-        .greeting-row {
           display: flex;
-          align-items: center;
-          gap: 8px;
+          align-items: flex-start;
+          gap: 14px;
+          margin-bottom: 14px;
+        }
+        
+        .greeting-icon {
+          margin-top: 4px;
+        }
+        .greeting-icon.sunrise { color: #f59e0b; }
+        .greeting-icon.sun { color: #fbbf24; }
+        .greeting-icon.sunset { color: #f97316; }
+        .greeting-icon.moon { color: #a78bfa; }
+        
+        .greeting-text {
+          font-size: 14px;
+          color: var(--text-secondary);
           margin-bottom: 4px;
         }
-        .greeting-emoji {
-          font-size: 24px;
-        }
-        .greeting-text {
-          font-size: 16px;
-          color: var(--text-secondary);
-        }
-        .name-row {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
+        
         .user-name {
           font-size: 28px;
           font-weight: 700;
-          background: linear-gradient(135deg, var(--gold) 0%, #f4d03f 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-        }
-        .edit-name-btn {
-          background: var(--bg-surface);
-          border: none;
-          width: 28px;
-          height: 28px;
-          border-radius: 6px;
           display: flex;
           align-items: center;
-          justify-content: center;
-          color: var(--text-muted);
+          gap: 8px;
           cursor: pointer;
         }
+        
+        .edit-icon {
+          color: var(--text-muted);
+          opacity: 0;
+          transition: opacity 0.2s;
+        }
+        .user-name:hover .edit-icon { opacity: 1; }
+        
         .name-edit {
           display: flex;
           gap: 8px;
           align-items: center;
         }
         .name-edit input {
-          font-size: 24px;
-          font-weight: 700;
+          font-size: 20px;
           background: var(--bg-surface);
           border: 2px solid var(--gold);
           border-radius: 8px;
           padding: 8px 12px;
-          color: var(--gold);
-          width: 200px;
+          color: var(--text-primary);
+          width: 180px;
         }
         .name-edit button {
-          background: var(--gold);
-          border: none;
-          width: 40px;
-          height: 40px;
+          padding: 8px 16px;
           border-radius: 8px;
-          color: var(--bg-primary);
+          font-size: 13px;
+          font-weight: 600;
           cursor: pointer;
+          border: none;
+          background: var(--gold);
+          color: var(--bg-primary);
         }
-        .header-stats {
+        .name-edit button.cancel {
+          background: var(--bg-surface);
+          color: var(--text-secondary);
+        }
+        
+        .badges-row {
           display: flex;
           gap: 8px;
         }
-        .level-badge {
-          display: flex;
+        
+        .tier-badge, .level-badge {
+          display: inline-flex;
           align-items: center;
-          gap: 6px;
-          background: linear-gradient(135deg, var(--primary) 0%, #1a4a3a 100%);
-          padding: 8px 14px;
+          gap: 5px;
+          padding: 6px 12px;
           border-radius: 20px;
-          font-size: 13px;
+          font-size: 12px;
           font-weight: 600;
+        }
+        
+        .level-badge {
+          background: var(--primary);
           color: var(--gold);
         }
-
-        .motivation-banner {
-          background: linear-gradient(135deg, rgba(212,175,55,0.15) 0%, rgba(212,175,55,0.05) 100%);
-          border: 1px solid rgba(212,175,55,0.3);
-          padding: 12px 16px;
-          border-radius: 12px;
-          text-align: center;
-          font-size: 14px;
-          color: var(--gold);
-          margin-bottom: 16px;
-        }
-
-        .xp-card {
+        
+        .level-progress-card {
           background: var(--bg-surface);
-          padding: 16px;
+          padding: 18px;
           border-radius: 14px;
           margin-bottom: 16px;
         }
-        .xp-header {
+        
+        .level-info {
           display: flex;
           justify-content: space-between;
+          font-size: 13px;
           margin-bottom: 10px;
         }
-        .xp-label {
-          font-size: 13px;
-          color: var(--text-secondary);
-        }
-        .xp-value {
-          font-size: 13px;
-          color: var(--gold);
-          font-weight: 600;
-        }
-        .xp-bar {
+        .xp-text { color: var(--gold); font-weight: 600; }
+        
+        .progress-bar {
           height: 8px;
           background: var(--bg-surface-light);
           border-radius: 4px;
           overflow: hidden;
+          margin-bottom: 8px;
         }
-        .xp-fill {
+        .progress-fill {
           height: 100%;
-          background: linear-gradient(90deg, var(--gold) 0%, #f4d03f 100%);
+          background: linear-gradient(90deg, var(--gold), var(--gold-light));
           border-radius: 4px;
           transition: width 0.5s ease;
         }
-        .xp-total {
-          display: block;
-          text-align: right;
+        .xp-to-next {
           font-size: 11px;
           color: var(--text-muted);
-          margin-top: 6px;
         }
-
-        .stats-grid {
+        
+        .stats-row {
           display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-          margin-bottom: 16px;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 10px;
+          margin-bottom: 24px;
         }
+        
         .stat-card {
-          display: flex;
-          align-items: center;
-          gap: 12px;
+          background: var(--bg-surface);
           padding: 16px;
-          border-radius: 14px;
+          border-radius: 12px;
+          text-align: center;
         }
-        .stat-card.streak {
-          background: linear-gradient(135deg, rgba(231,76,60,0.2) 0%, rgba(231,76,60,0.05) 100%);
-          color: #e74c3c;
-        }
-        .stat-card.prayers {
-          background: linear-gradient(135deg, rgba(46,204,113,0.2) 0%, rgba(46,204,113,0.05) 100%);
-          color: var(--success);
-        }
-        .stat-info {
-          display: flex;
-          flex-direction: column;
-        }
+        .stat-card svg { margin-bottom: 8px; }
+        .stat-card.streak svg { color: #ef4444; }
+        .stat-card.xp svg { color: var(--gold); }
+        .stat-card.awards svg { color: #3b82f6; }
         .stat-value {
-          font-size: 24px;
+          display: block;
+          font-size: 22px;
           font-weight: 700;
           font-family: 'Space Grotesk', sans-serif;
         }
         .stat-label {
           font-size: 11px;
-          opacity: 0.8;
-        }
-
-        .next-prayer-card {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          background: linear-gradient(135deg, var(--primary) 0%, #1a4a3a 100%);
-          padding: 20px;
-          border-radius: 16px;
-          margin-bottom: 20px;
-          text-decoration: none;
-          color: var(--text-primary);
-          position: relative;
-          overflow: hidden;
-        }
-        .prayer-glow {
-          position: absolute;
-          top: -50%;
-          right: -20%;
-          width: 150px;
-          height: 150px;
-          background: radial-gradient(circle, rgba(212,175,55,0.3) 0%, transparent 70%);
-          pointer-events: none;
-        }
-        .prayer-content {
-          flex: 1;
-          z-index: 1;
-        }
-        .next-label {
-          font-size: 11px;
           color: var(--text-muted);
-          text-transform: uppercase;
-          letter-spacing: 1px;
         }
-        .prayer-name {
-          font-size: 22px;
-          font-weight: 700;
-          color: var(--gold);
-          margin: 4px 0;
-        }
-        .prayer-time {
-          font-size: 14px;
-          color: var(--text-secondary);
-        }
-
-        .rings-section {
-          margin-bottom: 24px;
-        }
-        .rings-section h2 {
+        
+        .quick-access h2 {
           font-size: 16px;
           color: var(--text-secondary);
           margin-bottom: 14px;
         }
-        .rings-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 12px;
-        }
-        .ring-item {
+        
+        .progress-cards {
           display: flex;
           flex-direction: column;
-          align-items: center;
-          gap: 8px;
-          text-decoration: none;
-          color: var(--text-primary);
-          padding: 12px 8px;
-          background: var(--bg-surface);
-          border-radius: 14px;
-          transition: transform 0.2s ease;
-        }
-        .ring-item:hover {
-          transform: translateY(-4px);
-        }
-        .ring-value {
-          font-size: 18px;
-          font-weight: 700;
-        }
-        .ring-label {
-          font-size: 11px;
-          color: var(--text-muted);
-        }
-
-        .tracking-section {
-          margin-bottom: 24px;
-        }
-        .tracking-section h2 {
-          font-size: 16px;
-          color: var(--text-secondary);
-          margin-bottom: 14px;
-        }
-        .tracking-card {
-          display: flex;
-          gap: 14px;
-          padding: 16px;
-          background: var(--bg-surface);
-          border-radius: 14px;
-          margin-bottom: 10px;
-        }
-        .tracking-icon {
-          width: 44px;
-          height: 44px;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-        }
-        .tracking-card.quran .tracking-icon {
-          background: rgba(212,175,55,0.2);
-          color: var(--gold);
-        }
-        .tracking-card.quiz .tracking-icon {
-          background: rgba(155,89,182,0.2);
-          color: #9b59b6;
-        }
-        .tracking-card.workout .tracking-icon {
-          background: rgba(231,76,60,0.2);
-          color: #e74c3c;
-        }
-        .tracking-content {
-          flex: 1;
-        }
-        .tracking-content h4 {
-          font-size: 14px;
-          margin-bottom: 10px;
-        }
-        .tracking-stats {
-          display: flex;
-          gap: 16px;
-        }
-        .track-stat {
-          display: flex;
-          flex-direction: column;
-        }
-        .track-value {
-          font-size: 18px;
-          font-weight: 700;
-          font-family: 'Space Grotesk', sans-serif;
-        }
-        .track-label {
-          font-size: 10px;
-          color: var(--text-muted);
-        }
-
-        .quick-actions h2 {
-          font-size: 16px;
-          color: var(--text-secondary);
-          margin-bottom: 14px;
-        }
-        .actions-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
           gap: 10px;
         }
-        .action-btn {
+        
+        .progress-card {
           display: flex;
-          flex-direction: column;
           align-items: center;
-          gap: 8px;
-          padding: 16px 10px;
+          gap: 14px;
           background: var(--bg-surface);
+          padding: 16px;
           border-radius: 14px;
           text-decoration: none;
           color: var(--text-primary);
           transition: all 0.2s ease;
+          border-left: 4px solid transparent;
         }
-        .action-btn:hover {
+        .progress-card:hover {
+          background: var(--bg-surface-light);
+          transform: translateX(4px);
+        }
+        
+        .progress-card.salah { border-left-color: var(--ring-salah); }
+        .progress-card.quran { border-left-color: var(--ring-quran); }
+        .progress-card.workout { border-left-color: var(--ring-workout); }
+        .progress-card.habits { border-left-color: var(--ring-habit); }
+        
+        .card-icon {
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
+          background: var(--bg-surface-light);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .progress-card.salah .card-icon { color: var(--ring-salah); }
+        .progress-card.quran .card-icon { color: var(--ring-quran); }
+        .progress-card.workout .card-icon { color: var(--ring-workout); }
+        .progress-card.habits .card-icon { color: var(--ring-habit); }
+        
+        .card-content {
+          flex: 1;
+        }
+        .card-content h3 { font-size: 15px; margin-bottom: 2px; }
+        .card-stat { font-size: 12px; color: var(--text-muted); }
+        
+        .mini-progress-bar {
+          height: 4px;
+          background: var(--bg-surface-light);
+          border-radius: 2px;
+          margin-top: 6px;
+          overflow: hidden;
+        }
+        .mini-progress-fill {
+          height: 100%;
+          background: linear-gradient(90deg, var(--ring-quran), #27ae60);
+          border-radius: 2px;
+          transition: width 0.5s ease;
+        }
+        
+        .points-badge {
+          display: flex;
+          align-items: center;
+          gap: 4px;
           background: var(--primary);
-          transform: translateY(-2px);
-        }
-        .action-emoji {
-          font-size: 24px;
-        }
-        .action-btn span:last-child {
+          padding: 6px 10px;
+          border-radius: 20px;
           font-size: 12px;
-          font-weight: 500;
+          font-weight: 600;
+          color: var(--gold);
+        }
+        
+        .chevron { color: var(--text-muted); }
+        
+        .upgrade-banner {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          background: linear-gradient(135deg, #92400e 0%, #78350f 100%);
+          padding: 18px;
+          border-radius: 14px;
+          margin-top: 24px;
+          text-decoration: none;
+          color: var(--text-primary);
+          border: 1px solid rgba(251,191,36,0.3);
+        }
+        .upgrade-banner svg:first-child { color: #fbbf24; }
+        .upgrade-banner h4 { font-size: 15px; color: #fbbf24; margin-bottom: 2px; }
+        .upgrade-banner p { font-size: 12px; color: var(--text-secondary); }
+        .upgrade-banner > svg:last-child { margin-left: auto; color: var(--text-muted); }
+        
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
     </div>
-  );
-}
-
-// Sunset icon component
-function Sunset({ className }) {
-  return (
-    <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M17 18a5 5 0 0 0-10 0"/>
-      <line x1="12" y1="9" x2="12" y2="2"/>
-      <line x1="4.22" y1="10.22" x2="5.64" y2="11.64"/>
-      <line x1="1" y1="18" x2="3" y2="18"/>
-      <line x1="21" y1="18" x2="23" y2="18"/>
-      <line x1="18.36" y1="11.64" x2="19.78" y2="10.22"/>
-      <line x1="23" y1="22" x2="1" y2="22"/>
-      <polyline points="16 5 12 9 8 5"/>
-    </svg>
   );
 }
 
